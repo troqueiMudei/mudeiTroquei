@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mx-auto px-4">
+    <h1 class="text-2xl font-bold mb-4">Resultados da Busca</h1>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for produto in resultados.produtos %}
+        <div class="border rounded-lg p-4 shadow">
+            {% if produto.imagem %}
+            <div class="mb-4">
+                <img src="{{ produto.imagem }}" alt="{{ produto.nome }}" class="w-full h-48 object-cover rounded">
+            </div>
+            {% endif %}
+            
+            <h2 class="text-lg font-semibold mb-2">{{ produto.nome }}</h2>
+            
+            {# Tratamento específico para o preço #}
+            <div class="mb-2">
+                {% if produto.preco is not none %}
+                    <p class="text-lg font-bold text-green-600">R$ {{ "%.2f"|format(produto.preco) }}</p>
+                {% else %}
+                    <p class="text-gray-600">Preço não disponível</p>
+                {% endif %}
+            </div>
+            
+            {% if produto.link %}
+            <a href="{{ produto.link }}" target="_blank" 
+               class="inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors">
+                Ver Produto
+            </a>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% if not resultados.produtos %}
+    <div class="text-center py-8">
+        <p class="text-gray-600">Nenhum produto encontrado.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
