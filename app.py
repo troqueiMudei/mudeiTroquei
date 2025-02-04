@@ -3,7 +3,7 @@ import re
 import time
 import requests
 from flask import Flask, render_template, request, redirect, url_for, session
-from flask_mysqldb import MySQL
+from flask_sqlalchemy import SQLAlchemy
 from PIL import Image
 import io
 import base64
@@ -15,18 +15,15 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
 app = Flask(__name__)
-app.secret_key = 'sua_chave_secreta_aqui'  # Chave secreta para criptografar a sessão
+app.secret_key = os.getenv('SECRET_KEY', 'uma_chave_segura_aqui')  # Chave secreta para criptografar a sessão
 
-# Configuração do MySQL
-app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = '123456'
-app.config['MYSQL_DB'] = 'mudeiTroquei'
-app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
-
-mysql = MySQL(app)
+# Configuração do SQLAlchemy com PostgreSQL
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -89,6 +86,42 @@ BAIRROS = {
     55: "Higienópolis"
 }
 
+# Modelo da tabela Ficha
+class Ficha(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    cpf = db.Column(db.String(14), nullable=False)
+    telefone = db.Column(db.String(15), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    produto = db.Column(db.String(100), nullable=False)
+    marca = db.Column(db.String(100), nullable=False)
+    dtCompra = db.Column(db.Date, nullable=False)
+    valor = db.Column(db.Numeric(10, 2), nullable=False)
+    marcaUso = db.Column(db.String(100), nullable=False)
+    descricao = db.Column(db.Text, nullable=False)
+    altura = db.Column(db.Numeric(10, 2), nullable=False)
+    largura = db.Column(db.Numeric(10, 2), nullable=False)
+    profundidade = db.Column(db.Numeric(10, 2), nullable=False)
+    quantidade = db.Column(db.Numeric(10, 2), nullable=False)
+    outroBairro = db.Column(db.String(100), nullable=True)
+    voltagem = db.Column(db.String(50), nullable=False)
+    tipoEstado = db.Column(db.String(50), nullable=False)
+    bairro = db.Column(db.Integer, nullable=False)
+    novo = db.Column(db.Boolean, nullable=False, default=False)
+    usado = db.Column(db.Boolean, nullable=False, default=False)
+    troca = db.Column(db.String(50), nullable=False)
+    nf = db.Column(db.String(50), nullable=False)
+    sujo = db.Column(db.String(50), nullable=False)
+    mofo = db.Column(db.Boolean, nullable=False, default=False)
+    cupim = db.Column(db.Boolean, nullable=False, default=False)
+    trincado = db.Column(db.Boolean, nullable=False, default=False)
+    desmontagem = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(50), nullable=False)
+    urgente = db.Column(db.String(50), nullable=False)
+    foto1 = db.Column(db.Text, nullable=True)
+    linksProduto = db.Column(db.Text, nullable=True)
+    fotosProduto = db.Column(db.Text, nullable=True)
+
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
     def __init__(self):
@@ -105,7 +138,7 @@ class ProdutoFinder:
         chrome_options.add_argument(
             'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-        self.driver = webdriver.Chrome(options=chrome_options)
+        self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         self.wait = WebDriverWait(self.driver, 10)
 
@@ -339,7 +372,7 @@ def upload_produto():
             'email': request.form['email'],
             'produto': request.form['produto'],
             'marca': request.form['marca'],
-            'dtCompra': request.form['data_compra'],
+            'dtCompra': datetime.strptime(request.form['data_compra'], '%Y-%m-%d'),
             'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
             'marcaUso': request.form['marcas_uso'],
             'descricao': request.form['descricao'],
@@ -350,15 +383,15 @@ def upload_produto():
             'outroBairro': request.form.get('outro_bairro', ''),
             'voltagem': request.form['voltagem'],
             'tipoEstado': request.form['tipo_reparo'],
-            'bairro': request.form['bairro'],
-            'novo': 1 if 'novo' in request.form.getlist('estado[]') else 0,
-            'usado': 1 if 'usado' in request.form.getlist('estado[]') else 0,
+            'bairro': int(request.form['bairro']),
+            'novo': 'novo' in request.form.getlist('estado[]'),
+            'usado': 'usado' in request.form.getlist('estado[]'),
             'troca': request.form['aceita_credito'],
             'nf': request.form['possui_nota_fiscal'],
             'sujo': request.form['precisa_limpeza'],
-            'mofo': 1 if 'possui_mofo' in request.form.getlist('estado[]') else 0,
-            'cupim': 1 if 'possui_cupim' in request.form.getlist('estado[]') else 0,
-            'trincado': 1 if 'esta_trincado' in request.form.getlist('estado[]') else 0,
+            'mofo': 'possui_mofo' in request.form.getlist('estado[]'),
+            'cupim': 'possui_cupim' in request.form.getlist('estado[]'),
+            'trincado': 'esta_trincado' in request.form.getlist('estado[]'),
             'desmontagem': request.form['precisa_desmontagem'],
             'status': 'Análise',  # Status padrão
             'urgente': 'não',
@@ -382,99 +415,31 @@ def upload_produto():
             form_data['fotosProduto'] = fotos_produto
 
         # Inserção no banco de dados
-        cur = mysql.connection.cursor()
-        cur.execute("""
-            INSERT INTO fichas (
-                nome, cpf, telefone, email, produto, desmontagem, marca, dtCompra, valor, valorEstimado,
-                marcaUso, descricao, altura, largura, profundidade, foto1, status, urgente, quantidade,
-                outroBairro, voltagem, bairro, tipoEstado, novo, usado, troca, nf, sujo, mofo, cupim,
-                trincado, linksProduto, fotosProduto
-            ) VALUES (
-                %(nome)s, %(cpf)s, %(telefone)s, %(email)s, %(produto)s, %(desmontagem)s, %(marca)s,
-                %(dtCompra)s, %(valor)s, %(valor)s, %(marcaUso)s, %(descricao)s, %(altura)s, %(largura)s,
-                %(profundidade)s, %(foto1)s, %(status)s, %(urgente)s, %(quantidade)s, %(outroBairro)s,
-                %(voltagem)s, %(bairro)s, %(tipoEstado)s, %(novo)s, %(usado)s, %(troca)s, %(nf)s, %(sujo)s,
-                %(mofo)s, %(cupim)s, %(trincado)s, %(linksProduto)s, %(fotosProduto)s
-            )
-        """, form_data)
-        mysql.connection.commit()
-        cur.close()
+        try:
+            nova_ficha = Ficha(**form_data)
+            db.session.add(nova_ficha)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Erro ao inserir ficha: {str(e)}")
+            return "Erro ao salvar os dados. Tente novamente.", 500
 
         return render_template('upload.html')
 
     return render_template('upload.html')
+
 @app.route('/lista')
 @login_required
 def lista_cadastros():
     status_filtro = request.args.get('status')
-    cur = mysql.connection.cursor()
-
     if status_filtro:
-        cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
+        fichas = Ficha.query.filter_by(status=status_filtro).order_by(Ficha.id.desc()).all()
     else:
-        cur.execute("SELECT * FROM fichas ORDER BY id DESC")
+        fichas = Ficha.query.order_by(Ficha.id.desc()).all()
 
-    fichas = cur.fetchall()
-    cur.close()
     return render_template('lista.html', fichas=fichas)
 
-@app.route('/detalhes/<int:id>')
-@login_required
-def detalhes_ficha(id):
-    cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
-    ficha = cur.fetchone()
-    cur.close()
-
-    # Decodifica os links e fotos dos produtos
-    ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
-    ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
-
-    # Cálculo do valor estimado
-    valor_estimado = float(ficha['valor'])
-
-    if ficha['desmontagem'] == 'Sim':
-        valor_estimado -= 50.00
-
-    if ficha['sujo'] == 'Sim':
-        valor_estimado -= 30.00
-
-    # Cálculo da demanda média e alta
-    demanda_media = valor_estimado + (valor_estimado * 0.05)
-    demanda_alta = valor_estimado + (valor_estimado * 0.10)
-
-    # Adiciona os valores calculados à ficha
-    ficha['valorEstimado'] = valor_estimado
-    ficha['demandaMedia'] = demanda_media
-    ficha['demandaAlta'] = demanda_alta
-
-    # Converter o número do bairro para o nome do bairro
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']), "Bairro não encontrado")
-
-    # Converter a data para o formato brasileiro (DD/MM/AAAA)
-    if ficha['dtCompra']:
-        data_compra = datetime.strptime(ficha['dtCompra'], '%Y-%m-%d')
-        ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
-    else:
-        ficha['dtCompra_br'] = "Data não informada"
-
-    return render_template('detalhes.html', ficha=ficha)
-
-@app.route('/atualizar_status/  <int:id>', methods=['POST'])
-@login_required
-def atualizar_status(id):
-    novo_status = request.form['status']
-    cur = mysql.connection.cursor()
-    cur.execute("UPDATE fichas SET status = %s WHERE id = %s", (novo_status, id))
-    mysql.connection.commit()
-    cur.close()
-    return redirect(url_for('detalhes_ficha', id=id))
-
 if __name__ == '__main__':
-    # Verifica se o script está sendo executado como CGI
-    if os.environ.get('GATEWAY_INTERFACE', '').startswith('CGI'):
-        from wsgiref.handlers import CGIHandler
-        CGIHandler().run(app)
-    else:
-        # Caso contrário, roda o aplicativo normalmente (para desenvolvimento)
-        app.run(debug=True)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
