@@ -21,7 +21,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'uma_chave_segura_aqui')  # Chave secreta para criptografar a sessão
 
 # Configuração do SQLAlchemy com PostgreSQL
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://root:KJl6miHOiN6TXJg8p6ihHq5LbjQ8g65v@dpg-cuh5e7btq21c73f7j630-a/mudeitroquei_znar'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
