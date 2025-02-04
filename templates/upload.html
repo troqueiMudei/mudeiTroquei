@@ -1,60 +1,323 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Busca por Imagem</title>
+    <title>Mudei & Troquei</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
-        .upload-form {
-            text-align: center;
-            padding: 20px;
-            border: 2px dashed #ccc;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-        .preview {
-            max-width: 300px;
-            margin: 20px auto;
-            display: none;
-        }
-        #imagePreview {
-            max-width: 100%;
-            height: auto;
+        input[type=number] {
+            -moz-appearance: textfield;
         }
     </style>
 </head>
-<body>
-    <h1>Busca de Produtos por Imagem</h1>
-    <div class="upload-form">
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="imagem" accept="image/*" onchange="previewImage(this)" required>
-            <button type="submit">Buscar Produtos Similares</button>
+<body class="bg-gray-50">
+    <div class="max-w-2xl mx-auto p-6">
+        <div class="text-center mb-8">
+            <br>
+            <img src="/static/logo.png" alt="Mudei & Troquei" class="mx-auto h-16">
+        </div>
+
+        <form method="POST" enctype="multipart/form-data" class="space-y-6">
+            <!-- Informações Pessoais -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome:</label>
+                    <input type="text" name="nome" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">CPF:</label>
+                    <input type="text" name="cpf" placeholder="xxx.xxx.xxx-xx" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Telefone:</label>
+                    <input type="tel" name="telefone" placeholder="(55) 99999-9999" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Email:</label>
+                    <input type="email" name="email" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+            </div>
+
+            <!-- Informações do Produto -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Produto:</label>
+                    <input type="text" name="produto" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Marca:</label>
+                    <input type="text" name="marca" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Quantidade:</label>
+                    <input type="number" name="quantidade" min="1" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data da compra:</label>
+                    <input type="date" name="data_compra" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Valor unitário:</label>
+                    <input type="number" name="valor_unitario" step="0.01" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Possui marcas de uso? Qual?</label>
+                    <input type="text" name="marcas_uso" placeholder="Arranhado"
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Descrição do item:</label>
+                    <input type="text" name="descricao" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Altura (cm):</label>
+                        <input type="number" name="altura" required
+                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Largura (cm):</label>
+                        <input type="number" name="largura" required
+                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Profundidade (cm):</label>
+                        <input type="number" name="profundidade" required
+                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Bairro:</label>
+                    <select name="bairro" required
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                        <option value="1">Barra da Tijuca</option>
+                        <option value="2">Recreio dos Bandeirantes</option>
+                        <option value="3">Vargem Grande</option>
+                        <option value="4">Vargem Pequena</option>
+                        <option value="5">Gardênia Azul</option>
+                        <option value="6">Cidade de Deus</option>
+                        <option value="7">Curicica</option>
+                        <option value="8">Taquara</option>
+                        <option value="9">Pechincha</option>
+                        <option value="10">Freguesia (Jacarepaguá)</option>
+                        <option value="11">Camorim</option>
+                        <option value="12">Tanque</option>
+                        <option value="13">Praça Seca</option>
+                        <option value="14">Madureira</option>
+                        <option value="16">Cascadura</option>
+                        <option value="17">Campinho</option>
+                        <option value="18">Méier</option>
+                        <option value="19">Engenho de Dentro</option>
+                        <option value="20">Vila Isabel</option>
+                        <option value="21">Tijuca</option>
+                        <option value="22">Maracanã</option>
+                        <option value="23">São Cristóvão</option>
+                        <option value="24">Centro</option>
+                        <option value="25">Flamengo</option>
+                        <option value="26">Botafogo</option>
+                        <option value="27">Copacabana</option>
+                        <option value="28">Ipanema</option>
+                        <option value="29">Leblon</option>
+                        <option value="30">Jardim Botânico</option>
+                        <option value="31">Laranjeiras</option>
+                        <option value="32">Cosme Velho</option>
+                        <option value="33">Glória</option>
+                        <option value="34">Santa Teresa</option>
+                        <option value="35">Lapa</option>
+                        <option value="36">Penha</option>
+                        <option value="37">Olaria</option>
+                        <option value="38">Ramos</option>
+                        <option value="39">Bonsucesso</option>
+                        <option value="40">Ilha do Governador</option>
+                        <option value="41">Pavuna</option>
+                        <option value="42">Anchieta</option>
+                        <option value="43">Guadalupe</option>
+                        <option value="44">Deodoro</option>
+                        <option value="45">Realengo</option>
+                        <option value="46">Bangu</option>
+                        <option value="47">Campo Grande</option>
+                        <option value="48">Santa Cruz</option>
+                        <option value="49">Sepetiba</option>
+                        <option value="50">Guaratiba</option>
+                        <option value="51">Pedra de Guaratiba</option>
+                        <option value="52">Grajaú</option>
+                        <option value="53">Engenho Novo</option>
+                        <option value="54">Rocha Miranda</option>
+                        <option value="55">Higienópolis</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Outro Bairro (inserir estimativa de frete):</label>
+                    <input type="text" name="outro_bairro"
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Voltagem:</label>
+                    <select name="voltagem" required
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                        <option value="110">110</option>
+                        <option value="220">220</option>
+                        <option value="Nao aplicavel">Não aplicável</option>
+                    </select>
+                </div>
+
+                <!-- Opções Sim/Não -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Precisa de limpeza:</label>
+                        <select name="precisa_limpeza" required
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Precisa de desmontagem:</label>
+                        <select name="precisa_desmontagem" required
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Possui nota fiscal:</label>
+                        <select name="possui_nota_fiscal" required
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Aceita crédito (voucher):</label>
+                        <select name="aceita_credito" required
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Tipo de reparo:</label>
+                    <select name="tipo_reparo" required
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                        <option value="nenhum">Nenhum</option>
+                        <option value="limpeza">Limpeza</option>
+                        <option value="conserto">Conserto</option>
+                    </select>
+                </div>
+
+                <!-- Upload de Imagens -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Imagens do produto:</label>
+                    <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                        <div class="space-y-1 text-center">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <div class="flex text-sm text-gray-600">
+                                <label class="relative cursor-pointer bg-white rounded-md font-medium text-green-600 hover:text-green-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-green-500">
+                                    <span>Upload de arquivos</span>
+                                    <input type="file" name="imagem" id="imagem" multiple accept="image/*" class="sr-only" required>
+                                </label>
+                            </div>
+                            <p class="text-xs text-gray-500">PNG, JPG até 10MB</p>
+                        </div>
+                    </div>
+                    <!-- Elemento para exibir a imagem -->
+                    <div id="image-preview" class="mt-4"></div>
+                </div>
+
+
+                <!-- Opções de Estado -->
+                <div class="space-y-4">
+                    <label class="block text-sm font-medium text-gray-700">Selecione as opções:</label>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="flex items-center">
+                            <input type="checkbox" name="estado[]" value="novo" class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded">
+                            <label class="ml-2 block text-sm text-gray-900">Novo</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="estado[]" value="usado" class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded">
+                            <label class="ml-2 block text-sm text-gray-900">Usado</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="estado[]" value="possui_mofo" class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded">
+                            <label class="ml-2 block text-sm text-gray-900">Possui mofo</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="estado[]" value="possui_cupim" class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded">
+                            <label class="ml-2 block text-sm text-gray-900">Possui Cupim</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="estado[]" value="esta_trincado" class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded">
+                            <label class="ml-2 block text-sm text-gray-900">Está Trincado</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botão de Envio -->
+            <div class="pt-5">
+                <button type="submit"
+                        class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    Enviar
+                </button>
+            </div>
         </form>
-    </div>
-    <div class="preview">
-        <img id="imagePreview">
+
     </div>
 
     <script>
-        function previewImage(input) {
-            const preview = document.getElementById('imagePreview');
-            const previewDiv = document.querySelector('.preview');
+        // Captura o evento de mudança no input de arquivo
+        document.getElementById('imagem').addEventListener('change', function(event) {
+            const preview = document.getElementById('image-preview');
+            preview.innerHTML = ''; // Limpa qualquer imagem anterior
 
-            if (input.files && input.files[0]) {
+            const files = event.target.files;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
                 const reader = new FileReader();
 
                 reader.onload = function(e) {
-                    preview.src = e.target.result;
-                    previewDiv.style.display = 'block';
-                }
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.className = 'w-32 h-32 object-cover rounded-md mt-2';
+                    preview.appendChild(img);
+                };
 
-                reader.readAsDataURL(input.files[0]);
+                reader.readAsDataURL(file);
             }
-        }
+        });
     </script>
 </body>
-</html>

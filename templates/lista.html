@@ -1,10 +1,54 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Title</title>
-</head>
-<body>
+{% extends "base.html" %}
+{% block content %}
+<div class="container mx-auto px-4">
+    <h1 class="text-2xl font-bold mb-4"> <br> Lista de Cadastros</h1>
 
-</body>
-</html>
+    <!-- Filtro de Status -->
+    <div class="mb-6">
+        <form method="GET" action="{{ url_for('lista_cadastros') }}">
+            <label for="status" class="block text-sm font-medium text-gray-700">Filtrar por Status:</label>
+            <select name="status" id="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                <option value="">Todos</option>
+                <option value="Análise" {% if request.args.get('status') == 'Análise' %}selected{% endif %}>Análise</option>
+                <option value="Aprovado" {% if request.args.get('status') == 'Aprovado' %}selected{% endif %}>Aprovado</option>
+                <option value="Recusado" {% if request.args.get('status') == 'Recusado' %}selected{% endif %}>Recusado</option>
+            </select>
+            <button type="submit" class="mt-2 inline-block bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors">
+                Filtrar
+            </button>
+        </form>
+    </div>
+
+    <!-- Botão de Logout -->
+    <div class="mb-6">
+        <a href="{{ url_for('logout') }}" class="inline-block bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition-colors">
+            Logout
+        </a>
+    </div>
+
+    <!-- Lista de Fichas -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% if fichas %}
+            {% for ficha in fichas %}
+            <div class="border rounded-lg p-4 shadow">
+                {% if ficha.foto1 %}
+                <div class="mb-4">
+                    <img src="data:image/jpeg;base64,{{ ficha.foto1 }}" alt="{{ ficha.nome }}" class="w-full h-64 object-cover rounded">
+                </div>
+                {% endif %}
+
+                <h2 class="text-xl font-semibold mb-2">{{ ficha.nome }}</h2>
+                <p class="text-gray-600">{{ ficha.produto }}</p>
+                <p class="text-lg font-bold text-green-600">R$ {{ "%.2f"|format(ficha.valor) }}</p>
+                <p class="text-sm text-gray-500">Status: {{ ficha.status }}</p>
+                <a href="{{ url_for('detalhes_ficha', id=ficha.id) }}" class="inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors">
+                    Ver Detalhes
+                </a>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-gray-600">Nenhuma ficha encontrada.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

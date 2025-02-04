@@ -1,25 +1,95 @@
 import os
 import re
-
-from flask import Flask, render_template, request
+import time
+import requests
+from flask import Flask, render_template, request, redirect, url_for, session
+from flask_mysqldb import MySQL
 from PIL import Image
 import io
+import base64
 import logging
+import json
+from datetime import datetime
+from functools import wraps
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-import time
-import requests
-from bs4 import BeautifulSoup
-import json
-from urllib.parse import urljoin
+
+app = Flask(__name__)
+app.secret_key = 'sua_chave_secreta_aqui'  # Chave secreta para criptografar a sessão
+
+# Configuração do MySQL
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = '123456'
+app.config['MYSQL_DB'] = 'mudeiTroquei'
+app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+
+mysql = MySQL(app)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Mapeamento de bairros
+BAIRROS = {
+    1: "Barra da Tijuca",
+    2: "Recreio dos Bandeirantes",
+    3: "Vargem Grande",
+    4: "Vargem Pequena",
+    5: "Gardênia Azul",
+    6: "Cidade de Deus",
+    7: "Curicica",
+    8: "Taquara",
+    9: "Pechincha",
+    10: "Freguesia (Jacarepaguá)",
+    11: "Camorim",
+    12: "Tanque",
+    13: "Praça Seca",
+    14: "Madureira",
+    16: "Cascadura",
+    17: "Campinho",
+    18: "Méier",
+    19: "Engenho de Dentro",
+    20: "Vila Isabel",
+    21: "Tijuca",
+    22: "Maracanã",
+    23: "São Cristóvão",
+    24: "Centro",
+    25: "Flamengo",
+    26: "Botafogo",
+    27: "Copacabana",
+    28: "Ipanema",
+    29: "Leblon",
+    30: "Jardim Botânico",
+    31: "Laranjeiras",
+    32: "Cosme Velho",
+    33: "Glória",
+    34: "Santa Teresa",
+    35: "Lapa",
+    36: "Penha",
+    37: "Olaria",
+    38: "Ramos",
+    39: "Bonsucesso",
+    40: "Ilha do Governador",
+    41: "Pavuna",
+    42: "Anchieta",
+    43: "Guadalupe",
+    44: "Deodoro",
+    45: "Realengo",
+    46: "Bangu",
+    47: "Campo Grande",
+    48: "Santa Cruz",
+    49: "Sepetiba",
+    50: "Guaratiba",
+    51: "Pedra de Guaratiba",
+    52: "Grajaú",
+    53: "Engenho Novo",
+    54: "Rocha Miranda",
+    55: "Higienópolis"
+}
 
+# Classe para buscar produtos por imagem
 class ProdutoFinder:
     def __init__(self):
         chrome_options = Options()
@@ -222,169 +292,189 @@ class ProdutoFinder:
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
             return []
-def _extract_products_selenium(self):
-    """Extrai produtos usando XPath"""
-    products = []
-    try:
-        # Lista de XPaths para tentar encontrar resultados
-        xpaths = [
-            "//div[contains(@class, 'isv-r')]",
-            "//div[@class='g' or contains(@class, 'g-card')]",
-            "//div[.//h3 or .//a[@href]]",
-            "//div[contains(@style, 'background-image')]",
-            "//a[.//img]"
-        ]
 
-        result_elements = []
-        for xpath in xpaths:
-            try:
-                logger.info(f"Tentando XPath: {xpath}")
-                elements = self.driver.find_elements(By.XPATH, xpath)
-                if elements:
-                    logger.info(f"Encontrados {len(elements)} elementos com XPath {xpath}")
-                    result_elements.extend(elements)
-                    break
-            except Exception as e:
-                logger.warning(f"XPath {xpath} falhou: {str(e)}")
-                continue
+# Decorator para verificar se o usuário está logado
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-        result_elements = list(set(result_elements))
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
 
-        for element in result_elements[:10]:
-            try:
-                # Extração do título (mantido como estava)
-                title = None
-                title_xpaths = [
-                    ".//h3",
-                    ".//div[contains(@class, 'title')]",
-                    ".//a",
-                    ".//span[string-length(text()) > 10]"
-                ]
+        # Validação simples (substitua por uma lógica de autenticação real)
+        if username == 'admin' and password == 'admin123':
+            session['logged_in'] = True  # Define a sessão como logada
+            return redirect(url_for('lista_cadastros'))
+        else:
+            return "Usuário ou senha inválidos", 401
 
-                for xpath in title_xpaths:
-                    try:
-                        title_element = element.find_element(By.XPATH, xpath)
-                        title = title_element.text.strip()
-                        if title:
-                            break
-                    except:
-                        continue
+    return render_template('login.html')
 
-                if not title:
-                    continue
-
-                # Extração do link (mantido como estava)
-                link = None
-                try:
-                    link_element = element.find_element(By.XPATH, ".//a")
-                    link = link_element.get_attribute('href')
-                except:
-                    try:
-                        link = element.get_attribute('href')
-                    except:
-                        continue
-
-                # Melhorada extração do preço
-                price = None
-                try:
-                    price_text = element.text
-                    # Padrão mais abrangente para preços
-                    price_matches = re.findall(r'R?\$?\s*(\d+[.,]\d{2}|\d+[.,]\d{3}|\d+)', price_text)
-                    if price_matches:
-                        price_str = price_matches[0]
-                        # Remove todos os caracteres não numéricos exceto '.' e ','
-                        price_str = re.sub(r'[^\d,.]', '', price_str)
-                        # Substitui vírgula por ponto se houver
-                        if ',' in price_str:
-                            price_str = price_str.replace('.', '').replace(',', '.')
-                        try:
-                            price = float(price_str)
-                        except ValueError:
-                            price = None
-                except Exception as e:
-                    logger.warning(f"Erro ao extrair preço: {str(e)}")
-                    price = None
-
-                # Extração da imagem (mantido como estava)
-                img = None
-                try:
-                    img_element = element.find_element(By.XPATH, ".//img")
-                    img = img_element.get_attribute('src')
-                except:
-                    try:
-                        style = element.get_attribute('style')
-                        if style and 'background-image' in style:
-                            img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
-                    except:
-                        pass
-
-                if title and link:  # Requisitos mínimos
-                    product = {
-                        "nome": title,
-                        "preco": price,  # Agora será None se não encontrar preço válido
-                        "link": link,
-                        "imagem": img
-                    }
-                    products.append(product)
-                    logger.info(f"Produto extraído: {title}")
-
-            except Exception as e:
-                logger.error(f"Erro ao extrair produto individual: {str(e)}")
-                continue
-
-        return products
-
-    except Exception as e:
-        logger.error(f"Erro ao extrair produtos: {str(e)}")
-        return []
-
-app = Flask(__name__)
+# Instância do ProdutoFinder
 finder = ProdutoFinder()
 
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)  # Remove o status de logado da sessão
+    return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def upload_produto():
     if request.method == 'POST':
         logger.info("Recebida requisição POST")
 
-        if 'imagem' not in request.files:
-            logger.error("Nenhuma imagem enviada")
-            return "Nenhuma imagem enviada", 400
+        # Coleta dos dados do formulário
+        form_data = {
+            'nome': request.form['nome'],
+            'cpf': request.form['cpf'],
+            'telefone': request.form['telefone'],
+            'email': request.form['email'],
+            'produto': request.form['produto'],
+            'marca': request.form['marca'],
+            'dtCompra': request.form['data_compra'],
+            'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
+            'marcaUso': request.form['marcas_uso'],
+            'descricao': request.form['descricao'],
+            'altura': float(request.form['altura']) if request.form['altura'] else 0.0,
+            'largura': float(request.form['largura']) if request.form['largura'] else 0.0,
+            'profundidade': float(request.form['profundidade']) if request.form['profundidade'] else 0.0,
+            'quantidade': float(request.form['quantidade']) if request.form['quantidade'] else 0.0,
+            'outroBairro': request.form.get('outro_bairro', ''),
+            'voltagem': request.form['voltagem'],
+            'tipoEstado': request.form['tipo_reparo'],
+            'bairro': request.form['bairro'],
+            'novo': 1 if 'novo' in request.form.getlist('estado[]') else 0,
+            'usado': 1 if 'usado' in request.form.getlist('estado[]') else 0,
+            'troca': request.form['aceita_credito'],
+            'nf': request.form['possui_nota_fiscal'],
+            'sujo': request.form['precisa_limpeza'],
+            'mofo': 1 if 'possui_mofo' in request.form.getlist('estado[]') else 0,
+            'cupim': 1 if 'possui_cupim' in request.form.getlist('estado[]') else 0,
+            'trincado': 1 if 'esta_trincado' in request.form.getlist('estado[]') else 0,
+            'desmontagem': request.form['precisa_desmontagem'],
+            'status': 'Análise',  # Status padrão
+            'urgente': 'não',
+        }
 
-        imagem = request.files['imagem']
-
-        if imagem.filename == '':
-            logger.error("Nenhum arquivo selecionado")
-            return "Nenhum arquivo selecionado", 400
-
-        try:
+        # Processamento da imagem
+        if 'imagem' in request.files:
+            imagem = request.files['imagem']
             img = Image.open(imagem)
-            logger.info(f"Imagem aberta com sucesso: {img.format} {img.size}")
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format='JPEG')
+            img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+            form_data['foto1'] = img_str
 
-            resultados = finder.buscar_produtos(img)
+            # Busca de produtos usando a imagem
+            produtos_encontrados = finder.buscar_produtos(img)
+            links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']} for p in produtos_encontrados])
+            fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
 
-            # Log dos resultados antes de renderizar
-            logger.debug(f"Resultados obtidos: {json.dumps(resultados, ensure_ascii=False)}")
+            form_data['linksProduto'] = links_produto
+            form_data['fotosProduto'] = fotos_produto
 
-            if not resultados:
-                logger.warning("Nenhum produto encontrado")
-                return "Nenhum produto encontrado", 404
+        # Inserção no banco de dados
+        cur = mysql.connection.cursor()
+        cur.execute("""
+            INSERT INTO fichas (
+                nome, cpf, telefone, email, produto, desmontagem, marca, dtCompra, valor, valorEstimado,
+                marcaUso, descricao, altura, largura, profundidade, foto1, status, urgente, quantidade,
+                outroBairro, voltagem, bairro, tipoEstado, novo, usado, troca, nf, sujo, mofo, cupim,
+                trincado, linksProduto, fotosProduto
+            ) VALUES (
+                %(nome)s, %(cpf)s, %(telefone)s, %(email)s, %(produto)s, %(desmontagem)s, %(marca)s,
+                %(dtCompra)s, %(valor)s, %(valor)s, %(marcaUso)s, %(descricao)s, %(altura)s, %(largura)s,
+                %(profundidade)s, %(foto1)s, %(status)s, %(urgente)s, %(quantidade)s, %(outroBairro)s,
+                %(voltagem)s, %(bairro)s, %(tipoEstado)s, %(novo)s, %(usado)s, %(troca)s, %(nf)s, %(sujo)s,
+                %(mofo)s, %(cupim)s, %(trincado)s, %(linksProduto)s, %(fotosProduto)s
+            )
+        """, form_data)
+        mysql.connection.commit()
+        cur.close()
 
-            # Validação extra dos resultados
-            resultados_validados = []
-            for produto in resultados:
-                if isinstance(produto.get('preco'), (float, int, type(None))):
-                    resultados_validados.append(produto)
-                else:
-                    logger.warning(f"Produto com preço inválido removido: {produto}")
-
-            return render_template('resultados.html', resultados={"produtos": resultados_validados})
-
-        except Exception as e:
-            logger.error(f"Erro ao processar requisição: {str(e)}", exc_info=True)
-            return f"Erro ao processar requisição: {str(e)}", 500
+        return render_template('upload.html')
 
     return render_template('upload.html')
+@app.route('/lista')
+@login_required
+def lista_cadastros():
+    status_filtro = request.args.get('status')
+    cur = mysql.connection.cursor()
+
+    if status_filtro:
+        cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
+    else:
+        cur.execute("SELECT * FROM fichas ORDER BY id DESC")
+
+    fichas = cur.fetchall()
+    cur.close()
+    return render_template('lista.html', fichas=fichas)
+
+@app.route('/detalhes/<int:id>')
+@login_required
+def detalhes_ficha(id):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
+    ficha = cur.fetchone()
+    cur.close()
+
+    # Decodifica os links e fotos dos produtos
+    ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
+    ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
+
+    # Cálculo do valor estimado
+    valor_estimado = float(ficha['valor'])
+
+    if ficha['desmontagem'] == 'Sim':
+        valor_estimado -= 50.00
+
+    if ficha['sujo'] == 'Sim':
+        valor_estimado -= 30.00
+
+    # Cálculo da demanda média e alta
+    demanda_media = valor_estimado + (valor_estimado * 0.05)
+    demanda_alta = valor_estimado + (valor_estimado * 0.10)
+
+    # Adiciona os valores calculados à ficha
+    ficha['valorEstimado'] = valor_estimado
+    ficha['demandaMedia'] = demanda_media
+    ficha['demandaAlta'] = demanda_alta
+
+    # Converter o número do bairro para o nome do bairro
+    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']), "Bairro não encontrado")
+
+    # Converter a data para o formato brasileiro (DD/MM/AAAA)
+    if ficha['dtCompra']:
+        data_compra = datetime.strptime(ficha['dtCompra'], '%Y-%m-%d')
+        ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
+    else:
+        ficha['dtCompra_br'] = "Data não informada"
+
+    return render_template('detalhes.html', ficha=ficha)
+
+@app.route('/atualizar_status/  <int:id>', methods=['POST'])
+@login_required
+def atualizar_status(id):
+    novo_status = request.form['status']
+    cur = mysql.connection.cursor()
+    cur.execute("UPDATE fichas SET status = %s WHERE id = %s", (novo_status, id))
+    mysql.connection.commit()
+    cur.close()
+    return redirect(url_for('detalhes_ficha', id=id))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Verifica se o script está sendo executado como CGI
+    if os.environ.get('GATEWAY_INTERFACE', '').startswith('CGI'):
+        from wsgiref.handlers import CGIHandler
+        CGIHandler().run(app)
+    else:
+        # Caso contrário, roda o aplicativo normalmente (para desenvolvimento)
+        app.run(debug=True)
