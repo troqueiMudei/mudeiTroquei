@@ -361,8 +361,7 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
-@login_required
-def upload_produto():
+def upload_produto():  # Removido o @login_required
     if request.method == 'POST':
         logger.info("Recebida requisição POST")
 
