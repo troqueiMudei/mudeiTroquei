@@ -138,8 +138,6 @@ class ProdutoFinder:
         chrome_options.add_argument(
             'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-        # self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=chrome_options)
-        # self.driver = webdriver.Chrome(executable_path=ChromeDriverManager().install(), options=chrome_options)
         self.driver = webdriver.Chrome(options=chrome_options)
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         self.wait = WebDriverWait(self.driver, 10)
@@ -442,5 +440,9 @@ def lista_cadastros():
 
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+            logger.info("Tabelas criadas com sucesso.")
+        except Exception as e:
+            logger.error(f"Erro ao criar tabelas: {str(e)}")
     app.run(debug=True)
