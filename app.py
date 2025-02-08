@@ -359,7 +359,7 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
-def upload_produto():  # Removido o @login_required
+def upload_produto():
     if request.method == 'POST':
         logger.info("Recebida requisição POST")
 
@@ -396,6 +396,9 @@ def upload_produto():  # Removido o @login_required
             'urgente': 'não',
         }
 
+        # Log dos dados do formulário
+        logger.info(f"Dados do formulário: {form_data}")
+
         # Processamento da imagem
         if 'imagem' in request.files:
             imagem = request.files['imagem']
@@ -418,9 +421,10 @@ def upload_produto():  # Removido o @login_required
             nova_ficha = Ficha(**form_data)
             db.session.add(nova_ficha)
             db.session.commit()
+            logger.info("Ficha inserida com sucesso.")
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Erro ao inserir ficha: {str(e)}")
+            logger.error(f"Erro ao inserir ficha: {str(e)}. Detalhes: {e.__class__.__name__}, {e.args}")
             return "Erro ao salvar os dados. Tente novamente.", 500
 
         return render_template('upload.html')
