@@ -15,7 +15,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
+from flask import Blueprint
+from models import Ficha
 from webdriver_manager.chrome import ChromeDriverManager
+
+bp = Blueprint('main', __name__)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'uma_chave_segura_aqui')  # Chave secreta para criptografar a sessão
@@ -431,15 +435,19 @@ def upload_produto():
 
     return render_template('upload.html')
 
+@app.route('/detalhes_ficha/<int:id>')
+def detalhes_ficha(id):
+    ficha = Ficha.query.get_or_404(id)
+    return render_template('detalhes_ficha.html', ficha=ficha)
+
 @app.route('/lista')
 @login_required
 def lista_cadastros():
-    status_filtro = request.args.get('status')
-    if status_filtro:
-        fichas = Ficha.query.filter_by(status=status_filtro).order_by(Ficha.id.desc()).all()
+    status = request.args.get('status')
+    if status:
+        fichas = Ficha.query.filter_by(status=status).order_by(Ficha.id.desc()).all()
     else:
         fichas = Ficha.query.order_by(Ficha.id.desc()).all()
-
     return render_template('lista.html', fichas=fichas)
 
 if __name__ == '__main__':
