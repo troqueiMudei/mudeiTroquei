@@ -16,6 +16,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from flask import Blueprint
+import logging
 from webdriver_manager.chrome import ChromeDriverManager
 
 bp = Blueprint('main', __name__)
@@ -28,7 +29,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://root:KJl6miHOiN6TXJg8p6ihH
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Mapeamento de bairros
@@ -362,78 +366,123 @@ def logout():
     session.pop('logged_in', None)  # Remove o status de logado da sessão
     return redirect(url_for('login'))
 
+
 @app.route('/', methods=['GET', 'POST'])
 def upload_produto():
     if request.method == 'POST':
-        logger.info("Recebida requisição POST")
-
-        # Coleta dos dados do formulário
-        form_data = {
-            'nome': request.form['nome'],
-            'cpf': request.form['cpf'],
-            'telefone': request.form['telefone'],
-            'email': request.form['email'],
-            'produto': request.form['produto'],
-            'marca': request.form['marca'],
-            'dtcompra': datetime.strptime(request.form['data_compra'], '%Y-%m-%d'),  # Alterado para dtcompra
-            'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
-            'marcauso': request.form['marcas_uso'],  # Alterado para marcauso
-            'descricao': request.form['descricao'],
-            'altura': float(request.form['altura']) if request.form['altura'] else 0.0,
-            'largura': float(request.form['largura']) if request.form['largura'] else 0.0,
-            'profundidade': float(request.form['profundidade']) if request.form['profundidade'] else 0.0,
-            'quantidade': float(request.form['quantidade']) if request.form['quantidade'] else 0.0,
-            'outrobairro': request.form.get('outro_bairro', ''),
-            'voltagem': request.form['voltagem'],
-            'tipoestado': request.form['tipo_reparo'],  # Alterado para tipoestado
-            'bairro': int(request.form['bairro']),
-            'novo': 'novo' in request.form.getlist('estado[]'),
-            'usado': 'usado' in request.form.getlist('estado[]'),
-            'troca': request.form['aceita_credito'],
-            'nf': request.form['possui_nota_fiscal'],
-            'sujo': request.form['precisa_limpeza'],
-            'mofo': 'possui_mofo' in request.form.getlist('estado[]'),
-            'cupim': 'possui_cupim' in request.form.getlist('estado[]'),
-            'trincado': 'esta_trincado' in request.form.getlist('estado[]'),
-            'desmontagem': request.form['precisa_desmontagem'],
-            'valorestimado': float(request.form['valorEstimado']) if request.form['valorEstimado'] else 0.0,
-            # Alterado para valorestimado
-            'status': 'Análise',
-            'urgente': 'não',
-        }
-
-        # Log dos dados do formulário
-        logger.info(f"Dados do formulário: {form_data}")
-
-        # Processamento da imagem
-        if 'imagem' in request.files:
-            imagem = request.files['imagem']
-            img = Image.open(imagem)
-            img_buffer = io.BytesIO()
-            img.save(img_buffer, format='JPEG')
-            img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-            form_data['foto1'] = img_str
-
-            # Busca de produtos usando a imagem
-            produtos_encontrados = finder.buscar_produtos(img)
-            links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']} for p in produtos_encontrados])
-            fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
-
-            form_data['linksProduto'] = links_produto
-            form_data['fotosProduto'] = fotos_produto
-
-        # Inserção no banco de dados
         try:
-            nova_ficha = Ficha(**form_data)
-            db.session.add(nova_ficha)
-            db.session.commit()
-            logger.info("Ficha inserida com sucesso.")
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Erro ao inserir ficha: {str(e)}. Detalhes: {e.__class__.__name__}, {e.args}")
-            return "Erro ao salvar os dados. Tente novamente.", 500
+            logger.info("Recebida requisição POST")
 
-        return render_template('upload.html')
+            # Log dos dados recebidos
+            logger.info(f"Form data recebida: {request.form}")
+            logger.info(f"Files recebidos: {request.files}")
+
+            # Verificação dos campos obrigatórios
+            required_fields = ['nome', 'cpf', 'telefone', 'email', 'produto', 'marca',
+                               'data_compra', 'valor_unitario', 'marcas_uso', 'descricao',
+                               'altura', 'largura', 'profundidade', 'quantidade',
+                               'voltagem', 'tipo_reparo', 'bairro', 'aceita_credito',
+                               'possui_nota_fiscal', 'precisa_limpeza', 'precisa_desmontagem',
+                               'valorEstimado']
+
+            for field in required_fields:
+                if field not in request.form:
+                    logger.error(f"Campo obrigatório ausente: {field}")
+                    return f"Campo obrigatório ausente: {field}", 400
+
+            # Validação da data
+            try:
+                data_compra = datetime.strptime(request.form['data_compra'], '%Y-%m-%d')
+            except ValueError as e:
+                logger.error(f"Erro ao converter data: {str(e)}")
+                return "Data de compra inválida", 400
+
+            # Validação dos valores numéricos
+            numeric_fields = ['valor_unitario', 'altura', 'largura', 'profundidade',
+                              'quantidade', 'valorEstimado']
+            for field in numeric_fields:
+                try:
+                    if request.form[field]:
+                        float(request.form[field])
+                except ValueError as e:
+                    logger.error(f"Erro ao converter valor numérico do campo {field}: {str(e)}")
+                    return f"Valor inválido para o campo: {field}", 400
+
+            # Coleta dos dados do formulário com validação
+            form_data = {
+                'nome': request.form['nome'],
+                'cpf': request.form['cpf'],
+                'telefone': request.form['telefone'],
+                'email': request.form['email'],
+                'produto': request.form['produto'],
+                'marca': request.form['marca'],
+                'dtcompra': data_compra,
+                'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
+                'marcauso': request.form['marcas_uso'],
+                'descricao': request.form['descricao'],
+                'altura': float(request.form['altura']) if request.form['altura'] else 0.0,
+                'largura': float(request.form['largura']) if request.form['largura'] else 0.0,
+                'profundidade': float(request.form['profundidade']) if request.form['profundidade'] else 0.0,
+                'quantidade': float(request.form['quantidade']) if request.form['quantidade'] else 0.0,
+                'outrobairro': request.form.get('outro_bairro', ''),
+                'voltagem': request.form['voltagem'],
+                'tipoestado': request.form['tipo_reparo'],
+                'bairro': int(request.form['bairro']),
+                'novo': 'novo' in request.form.getlist('estado[]'),
+                'usado': 'usado' in request.form.getlist('estado[]'),
+                'troca': request.form['aceita_credito'],
+                'nf': request.form['possui_nota_fiscal'],
+                'sujo': request.form['precisa_limpeza'],
+                'mofo': 'possui_mofo' in request.form.getlist('estado[]'),
+                'cupim': 'possui_cupim' in request.form.getlist('estado[]'),
+                'trincado': 'esta_trincado' in request.form.getlist('estado[]'),
+                'desmontagem': request.form['precisa_desmontagem'],
+                'valorestimado': float(request.form['valorEstimado']) if request.form['valorEstimado'] else 0.0,
+                'status': 'Análise',
+                'urgente': 'não',
+                'linksproduto': None,
+                'fotosproduto': None,
+                'foto1': None
+            }
+
+            # Processamento da imagem
+            if 'imagem' in request.files:
+                imagem = request.files['imagem']
+                if imagem.filename:  # Verifica se um arquivo foi realmente enviado
+                    try:
+                        img = Image.open(imagem)
+                        img_buffer = io.BytesIO()
+                        img.save(img_buffer, format='JPEG')
+                        img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+                        form_data['foto1'] = img_str
+
+                        # Busca de produtos usando a imagem
+                        produtos_encontrados = finder.buscar_produtos(img)
+                        links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']}
+                                                    for p in produtos_encontrados])
+                        fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
+
+                        form_data['linksproduto'] = links_produto
+                        form_data['fotosproduto'] = fotos_produto
+                    except Exception as e:
+                        logger.error(f"Erro no processamento da imagem: {str(e)}")
+                        return "Erro no processamento da imagem", 400
+
+            # Inserção no banco de dados
+            try:
+                nova_ficha = Ficha(**form_data)
+                db.session.add(nova_ficha)
+                db.session.commit()
+                logger.info("Ficha inserida com sucesso.")
+                return redirect(url_for('upload_produto'))
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Erro ao inserir ficha: {str(e)}. Detalhes: {e.__class__.__name__}, {e.args}")
+                return "Erro ao salvar os dados. Tente novamente.", 500
+
+        except Exception as e:
+            logger.error(f"Erro geral no processamento do formulário: {str(e)}")
+            return f"Erro no processamento do formulário: {str(e)}", 400
 
     return render_template('upload.html')
 
