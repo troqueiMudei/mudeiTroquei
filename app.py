@@ -130,6 +130,26 @@ class Ficha(db.Model):
     linksproduto = db.Column(db.Text, nullable=True)
     fotosproduto = db.Column(db.Text, nullable=True)
 
+    @property
+    def valorEstimado(self):
+        return self.valorestimado
+
+    @property
+    def dtCompra_br(self):
+        return self.dtcompra.strftime('%d/%m/%Y') if self.dtcompra else None
+
+    @property
+    def demandaMedia(self):
+        return self.valorestimado * 1.2 if self.valorestimado else 0
+
+    @property
+    def demandaAlta(self):
+        return self.valorestimado * 1.4 if self.valorestimado else 0
+
+    @property
+    def bairro_nome(self):
+        return BAIRROS.get(self.bairro, 'Não especificado')
+
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
     def __init__(self):

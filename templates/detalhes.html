@@ -34,8 +34,8 @@
                 <p><strong>Bairro Alternativo:</strong> {{ ficha.outroBairro }}</p>
                 <p><strong>Valor Ofertado:</strong> R$ {{ "%.2f"|format(ficha.valor) }}</p>
                 <p><strong>Valor Estimado:</strong>
-                    {% if ficha.valorEstimado is not none %}
-                        R$ {{ "%.2f"|format(ficha.valorEstimado) }}
+                    {% if ficha.valorestimado is not none %}
+                        R$ {{ "%.2f"|format(ficha.valorestimado) }}
                     {% else %}
                         N/A
                     {% endif %}
@@ -79,7 +79,7 @@
                 <!-- Demanda Baixa -->
                 <div class="p-4 bg-green-100 rounded-lg">
                     <p class="text-green-700 font-semibold">
-                        <strong>Demanda Baixa:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado) }}
+                        <strong>Demanda Baixa:</strong> R$ {{ "%.2f"|format(ficha.valorestimado) }}
                     </p>
                 </div>
 
