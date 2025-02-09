@@ -132,19 +132,39 @@ class Ficha(db.Model):
 
     @property
     def valorEstimado(self):
-        return self.valorestimado
+        return float(self.valorestimado) if self.valorestimado is not None else 0.0
 
     @property
     def dtCompra_br(self):
         return self.dtcompra.strftime('%d/%m/%Y') if self.dtcompra else None
 
     @property
+    def valor_venda(self):
+        """Calcula o valor de venda somando 192.50 ao valor estimado"""
+        if self.valorestimado is None:
+            return 0.0
+        return float(self.valorestimado) + 192.50
+
+    @property
     def demandaMedia(self):
-        return self.valorestimado * 1.2 if self.valorestimado else 0
+        """Calcula a demanda média (120% do valor estimado)"""
+        if self.valorestimado is None:
+            return 0.0
+        return float(self.valorestimado) * 1.2
 
     @property
     def demandaAlta(self):
-        return self.valorestimado * 1.4 if self.valorestimado else 0
+        """Calcula a demanda alta (140% do valor estimado)"""
+        if self.valorestimado is None:
+            return 0.0
+        return float(self.valorestimado) * 1.4
+
+
+    @property
+    def valor_formatado(self):
+        """Retorna o valor formatado como moeda"""
+        return f"R$ {float(self.valor):.2f}" if self.valor is not None else "R$ 0,00"
+
 
     @property
     def bairro_nome(self):

@@ -32,16 +32,10 @@
                 <p><strong>Marca:</strong> {{ ficha.marca }}</p>
                 <p><strong>Data da Compra:</strong> {{ ficha.dtCompra_br }}</p>  <!-- Data no formato brasileiro -->
                 <p><strong>Bairro Alternativo:</strong> {{ ficha.outroBairro }}</p>
-                <p><strong>Valor Ofertado:</strong> R$ {{ "%.2f"|format(ficha.valor) }}</p>
-                <p><strong>Valor Estimado:</strong>
-                    {% if ficha.valorestimado is not none %}
-                        R$ {{ "%.2f"|format(ficha.valorestimado) }}
-                    {% else %}
-                        N/A
-                    {% endif %}
-                </p>
-                <p><strong>Valor Comercial:</strong> R$ {{ "%.2f"|format(ficha.valor) }}</p>
-                <p><strong>Valor para Venda:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado + 192.5) }}</p>
+                <p><strong>Valor Ofertado:</strong> R$ {{ "%.2f"|format(ficha.valor|float) }}</p>
+                <p><strong>Valor Estimado:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado) }}</p>
+                <p><strong>Valor Comercial:</strong> R$ {{ "%.2f"|format(ficha.valor|float) }}</p>
+                <p><strong>Valor para Venda:</strong> R$ {{ "%.2f"|format(ficha.valor_venda) }}</p>
             </div>
         </div>
 
@@ -79,7 +73,7 @@
                 <!-- Demanda Baixa -->
                 <div class="p-4 bg-green-100 rounded-lg">
                     <p class="text-green-700 font-semibold">
-                        <strong>Demanda Baixa:</strong> R$ {{ "%.2f"|format(ficha.valorestimado) }}
+                        <strong>Demanda Baixa:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado) }}
                     </p>
                 </div>
 
