@@ -395,7 +395,8 @@ def upload_produto():
             'cupim': 'possui_cupim' in request.form.getlist('estado[]'),
             'trincado': 'esta_trincado' in request.form.getlist('estado[]'),
             'desmontagem': request.form['precisa_desmontagem'],
-            'status': 'Análise',  # Status padrão
+            'valorEstimado': float(request.form['valorEstimado']) if request.form['valorEstimado'] else 0.0,
+            'status': 'Análise',
             'urgente': 'não',
         }
 
