@@ -210,7 +210,7 @@ class ProdutoFinder:
 
             response = requests.post(
                 'https://api.imgbb.com/1/upload',
-                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                params={'key': '0fc604ad837227d7704b5e31dc36bfbb'},
                 files=files
             )
 
