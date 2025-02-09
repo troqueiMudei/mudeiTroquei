@@ -98,18 +98,18 @@ class Ficha(db.Model):
     email = db.Column(db.String(100), nullable=False)
     produto = db.Column(db.String(100), nullable=False)
     marca = db.Column(db.String(100), nullable=False)
-    dt_compra = db.Column('dtCompra', db.Date, nullable=False) 
+    dtcompra = db.Column(db.Date, nullable=False)
     valor = db.Column(db.Numeric(10, 2), nullable=False)
-    marcaUso = db.Column('marcaUso', db.String(100), nullable=False)
+    marcauso = db.Column(db.String(100), nullable=False)
     descricao = db.Column(db.Text, nullable=False)
     altura = db.Column(db.Numeric(10, 2), nullable=False)
     largura = db.Column(db.Numeric(10, 2), nullable=False)
     profundidade = db.Column(db.Numeric(10, 2), nullable=False)
     quantidade = db.Column(db.Numeric(10, 2), nullable=False)
-    valorEstimado = db.Column('valorEstimado', db.Numeric(10, 2), nullable=False)
-    outroBairro = db.Column('outrobairro', db.String(100), nullable=True)
+    valorestimado = db.Column(db.Numeric(10, 2), nullable=False)
+    outrobairro = db.Column(db.String(100), nullable=True)
     voltagem = db.Column(db.String(50), nullable=False)
-    tipoEstado = db.Column('tipoestado', db.String(50), nullable=False)
+    tipoestado = db.Column(db.String(50), nullable=False)
     bairro = db.Column(db.Integer, nullable=False)
     novo = db.Column(db.Boolean, nullable=False, default=False)
     usado = db.Column(db.Boolean, nullable=False, default=False)
@@ -123,8 +123,8 @@ class Ficha(db.Model):
     status = db.Column(db.String(50), nullable=False)
     urgente = db.Column(db.String(50), nullable=False)
     foto1 = db.Column(db.Text, nullable=True)
-    linksProduto = db.Column('linksproduto', db.Text, nullable=True)
-    fotosProduto = db.Column('fotosproduto', db.Text, nullable=True)
+    linksproduto = db.Column(db.Text, nullable=True)
+    fotosproduto = db.Column(db.Text, nullable=True)
 
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
@@ -375,17 +375,17 @@ def upload_produto():
             'email': request.form['email'],
             'produto': request.form['produto'],
             'marca': request.form['marca'],
-            'dtCompra': datetime.strptime(request.form['data_compra'], '%Y-%m-%d'),
+            'dtcompra': datetime.strptime(request.form['data_compra'], '%Y-%m-%d'),  # Alterado para dtcompra
             'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
-            'marcaUso': request.form['marcas_uso'],
+            'marcauso': request.form['marcas_uso'],  # Alterado para marcauso
             'descricao': request.form['descricao'],
             'altura': float(request.form['altura']) if request.form['altura'] else 0.0,
             'largura': float(request.form['largura']) if request.form['largura'] else 0.0,
             'profundidade': float(request.form['profundidade']) if request.form['profundidade'] else 0.0,
             'quantidade': float(request.form['quantidade']) if request.form['quantidade'] else 0.0,
-            'outroBairro': request.form.get('outro_bairro', ''),
+            'outrobairro': request.form.get('outro_bairro', ''),
             'voltagem': request.form['voltagem'],
-            'tipoEstado': request.form['tipo_reparo'],
+            'tipoestado': request.form['tipo_reparo'],  # Alterado para tipoestado
             'bairro': int(request.form['bairro']),
             'novo': 'novo' in request.form.getlist('estado[]'),
             'usado': 'usado' in request.form.getlist('estado[]'),
@@ -396,7 +396,8 @@ def upload_produto():
             'cupim': 'possui_cupim' in request.form.getlist('estado[]'),
             'trincado': 'esta_trincado' in request.form.getlist('estado[]'),
             'desmontagem': request.form['precisa_desmontagem'],
-            'valorEstimado': float(request.form['valorEstimado']) if request.form['valorEstimado'] else 0.0,
+            'valorestimado': float(request.form['valorEstimado']) if request.form['valorEstimado'] else 0.0,
+            # Alterado para valorestimado
             'status': 'Análise',
             'urgente': 'não',
         }
