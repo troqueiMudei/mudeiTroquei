@@ -494,7 +494,7 @@ def upload_produto():
                         img_buffer = io.BytesIO()
                         img.save(img_buffer, format='JPEG')
                         img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-                        form_data['foto1'] = img_str
+                        form_data['imagem'] = img_str
 
                         # Busca de produtos usando a imagem
                         produtos_encontrados = finder.buscar_produtos(img)
