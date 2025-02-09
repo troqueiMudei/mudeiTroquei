@@ -98,7 +98,7 @@ class Ficha(db.Model):
     email = db.Column(db.String(100), nullable=False)
     produto = db.Column(db.String(100), nullable=False)
     marca = db.Column(db.String(100), nullable=False)
-    dtCompra = db.Column('dtCompra', db.Date, nullable=False)
+    dt_compra = db.Column('dtCompra', db.Date, nullable=False) 
     valor = db.Column(db.Numeric(10, 2), nullable=False)
     marcaUso = db.Column('marcaUso', db.String(100), nullable=False)
     descricao = db.Column(db.Text, nullable=False)
