@@ -379,11 +379,10 @@ def upload_produto():
 
             # Verificação dos campos obrigatórios
             required_fields = ['nome', 'cpf', 'telefone', 'email', 'produto', 'marca',
-                               'data_compra', 'valor_unitario', 'marcas_uso', 'descricao',
-                               'altura', 'largura', 'profundidade', 'quantidade',
-                               'voltagem', 'tipo_reparo', 'bairro', 'aceita_credito',
-                               'possui_nota_fiscal', 'precisa_limpeza', 'precisa_desmontagem',
-                               'valorEstimado']
+               'data_compra', 'valor_unitario', 'marcas_uso', 'descricao',
+               'altura', 'largura', 'profundidade', 'quantidade',
+               'voltagem', 'tipo_reparo', 'bairro', 'aceita_credito',
+               'possui_nota_fiscal', 'precisa_limpeza', 'precisa_desmontagem']
 
             for field in required_fields:
                 if field not in request.form:
