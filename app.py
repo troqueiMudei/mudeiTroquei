@@ -488,7 +488,16 @@ def upload_produto():
             # Processamento da imagem
             if 'imagem' in request.files:
                 imagem = request.files['imagem']
-                if imagem.filename:  # Verifica se um arquivo foi realmente enviado
+                if imagem.filename:
+                    logger.info(f"Tentando fazer upload da imagem: {imagem.filename}")
+                    logger.info(f"Tamanho da imagem: {len(imagem.read())} bytes")
+                    imagem.seek(0)  # Volta ao início do arquivo após a leitura
+
+                    if len(imagem.read()) > 32 * 1024 * 1024:  # 32 MB
+                        logger.error("A imagem é muito grande (limite: 32 MB)")
+                        return None
+                    imagem.seek(0)
+
                     try:
                         # Abre a imagem e verifica se é válida
                         img = Image.open(imagem)
@@ -519,7 +528,7 @@ def upload_produto():
                             form_data['fotosproduto'] = None
 
                     except Exception as e:
-                        logger.error(f"Erro no processamento da imagem: {str(e)}")
+                        logger.error(f"Erro ao processar a imagem: {str(e)}")
                         return "Erro no processamento da imagem", 400
 
             # Inserção no banco de dados
