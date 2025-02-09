@@ -17,6 +17,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from flask import Blueprint
 import logging
+from flask import flash
 from webdriver_manager.chrome import ChromeDriverManager
 
 bp = Blueprint('main', __name__)
@@ -525,10 +526,12 @@ def upload_produto():
 
     return render_template('upload.html')
 
+
 @app.route('/detalhes_ficha/<int:id>')
 def detalhes_ficha(id):
     ficha = Ficha.query.get_or_404(id)
     return render_template('detalhes.html', ficha=ficha)
+
 
 @app.route('/lista')
 @login_required
@@ -539,6 +542,34 @@ def lista_cadastros():
     else:
         fichas = Ficha.query.order_by(Ficha.id.desc()).all()
     return render_template('lista.html', fichas=fichas)
+
+
+@app.route('/atualizar_status/<int:id>', methods=['POST'])
+@login_required
+def atualizar_status(id):
+    ficha = Ficha.query.get_or_404(id)
+
+    # Pega o novo status do formulário
+    novo_status = request.form.get('status')
+
+    # Valida se o status é permitido
+    status_permitidos = ['Análise', 'Aprovado', 'Recusado']
+    if novo_status not in status_permitidos:
+        flash('Status inválido', 'error')
+        return redirect(url_for('detalhes_ficha', id=id))
+
+    try:
+        # Atualiza o status
+        ficha.status = novo_status
+        db.session.commit()
+        flash(f'Status atualizado para {novo_status}', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash('Erro ao atualizar status', 'error')
+        logger.error(f'Erro ao atualizar status da ficha {id}: {str(e)}')
+
+    return redirect(url_for('detalhes_ficha', id=id))
+
 
 if __name__ == '__main__':
     with app.app_context():
