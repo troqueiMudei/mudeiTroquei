@@ -490,20 +490,34 @@ def upload_produto():
                 imagem = request.files['imagem']
                 if imagem.filename:  # Verifica se um arquivo foi realmente enviado
                     try:
+                        # Abre a imagem e verifica se é válida
                         img = Image.open(imagem)
+                        img.verify()  # Verifica se a imagem não está corrompida
+                        img = Image.open(imagem)  # Reabre a imagem após a verificação
+
+                        # Converte a imagem para base64
                         img_buffer = io.BytesIO()
-                        img.save(img_buffer, format='JPEG')
+                        img.save(img_buffer, format='JPEG', quality=95)
+                        img_buffer.seek(0)
                         img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
                         form_data['foto1'] = img_str
 
                         # Busca de produtos usando a imagem
                         produtos_encontrados = finder.buscar_produtos(img)
-                        links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']}
-                                                    for p in produtos_encontrados])
-                        fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
+                        if produtos_encontrados:
+                            # Converte os produtos encontrados em JSON
+                            links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']}
+                                                        for p in produtos_encontrados])
+                            fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
 
-                        form_data['linksproduto'] = links_produto
-                        form_data['fotosproduto'] = fotos_produto
+                            # Salva os dados no formulário
+                            form_data['linksproduto'] = links_produto
+                            form_data['fotosproduto'] = fotos_produto
+                        else:
+                            logger.warning("Nenhum produto encontrado na busca reversa de imagem")
+                            form_data['linksproduto'] = None
+                            form_data['fotosproduto'] = None
+
                     except Exception as e:
                         logger.error(f"Erro no processamento da imagem: {str(e)}")
                         return "Erro no processamento da imagem", 400
