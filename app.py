@@ -437,7 +437,7 @@ def upload_produto():
 @app.route('/detalhes_ficha/<int:id>')
 def detalhes_ficha(id):
     ficha = Ficha.query.get_or_404(id)
-    return render_template('detalhes_ficha.html', ficha=ficha)
+    return render_template('detalhes.html', ficha=ficha)
 
 @app.route('/lista')
 @login_required
