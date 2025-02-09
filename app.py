@@ -106,6 +106,7 @@ class Ficha(db.Model):
     largura = db.Column(db.Numeric(10, 2), nullable=False)
     profundidade = db.Column(db.Numeric(10, 2), nullable=False)
     quantidade = db.Column(db.Numeric(10, 2), nullable=False)
+    valorEstimado = db.Column(db.Numeric(10, 2), nullable=False)
     outroBairro = db.Column(db.String(100), nullable=True)
     voltagem = db.Column(db.String(50), nullable=False)
     tipoEstado = db.Column(db.String(50), nullable=False)
