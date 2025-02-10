@@ -406,6 +406,9 @@ def logout():
     session.pop('logged_in', None)  # Remove o status de logado da sessão
     return redirect(url_for('login'))
 
+UPLOAD_FOLDER = 'static/uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_produto():
@@ -488,23 +491,21 @@ def upload_produto():
             if 'imagem' in request.files:
                 imagem = request.files['imagem']
                 if imagem.filename:
-                    logger.info(f"Tentando fazer upload da imagem: {imagem.filename}")
-                    logger.info(f"Tamanho da imagem: {len(imagem.read())} bytes")
-                    imagem.seek(0)  # Volta ao início do arquivo após a leitura
-
-                    if len(imagem.read()) > 32 * 1024 * 1024:  # 32 MB
-                        logger.error("A imagem é muito grande (limite: 32 MB)")
-                        return None
-                    imagem.seek(0)
-
                     try:
                         # Abre a imagem e verifica se é válida
                         img = Image.open(imagem)
                         img.verify()  # Verifica se a imagem não está corrompida
-                        img = Image.open(imagem)
                         img = Image.open(imagem)  # Reabre a imagem após a verificação
 
-                        # Converte a imagem para base64
+                        # Redimensiona a imagem para um tamanho máximo de 800x800
+                        img.thumbnail((800, 800))
+
+                        # Salva a imagem localmente
+                        filename = f"{int(time.time())}_{imagem.filename}"
+                        filepath = os.path.join(UPLOAD_FOLDER, filename)
+                        img.save(filepath, format='JPEG', quality=95)
+
+                        # Converte a imagem para base64 (opcional)
                         img_buffer = io.BytesIO()
                         img.save(img_buffer, format='JPEG', quality=95)
                         img_buffer.seek(0)
@@ -530,7 +531,6 @@ def upload_produto():
                     except Exception as e:
                         logger.error(f"Erro ao processar a imagem: {str(e)}")
                         return "Erro no processamento da imagem", 400
-
             # Inserção no banco de dados
             try:
                 nova_ficha = Ficha(**form_data)
