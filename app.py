@@ -7,7 +7,6 @@ from flask_sqlalchemy import SQLAlchemy
 from PIL import Image
 import io
 import base64
-import logging
 import json
 from datetime import datetime
 from functools import wraps
@@ -502,6 +501,7 @@ def upload_produto():
                         # Abre a imagem e verifica se é válida
                         img = Image.open(imagem)
                         img.verify()  # Verifica se a imagem não está corrompida
+                        img = Image.open(imagem)
                         img = Image.open(imagem)  # Reabre a imagem após a verificação
 
                         # Converte a imagem para base64
