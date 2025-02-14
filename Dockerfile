@@ -2,7 +2,6 @@ FROM python:3.10-slim
 
 # Definir variáveis de ambiente
 ENV DEBIAN_FRONTEND=noninteractive
-# Atualizando para a versão mais recente do Chrome
 ENV CHROME_VERSION="133.0.6943.98-1"
 ENV CHROMEDRIVER_VERSION="133.0.6943.98"
 
@@ -47,6 +46,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Adicionar script de inicialização
+COPY start.sh .
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app", "--timeout", "120"]
+# Usar script de inicialização
+CMD ["./start.sh"]

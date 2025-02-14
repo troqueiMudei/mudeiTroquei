@@ -485,50 +485,56 @@ def atualizar_status(id):
 
 
 def create_tables():
-    cur = mysql.connection.cursor()
+    try:
+        cur = mysql.connection.cursor()
 
-    # Criação da tabela fichas
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS fichas (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nome VARCHAR(255),
-        cpf VARCHAR(14),
-        telefone VARCHAR(20),
-        email VARCHAR(255),
-        produto VARCHAR(255),
-        desmontagem VARCHAR(3),
-        marca VARCHAR(255),
-        dtCompra DATE,
-        valor DECIMAL(10,2),
-        valorEstimado DECIMAL(10,2),
-        marcaUso VARCHAR(255),
-        descricao TEXT,
-        altura DECIMAL(10,2),
-        largura DECIMAL(10,2),
-        profundidade DECIMAL(10,2),
-        foto1 LONGTEXT,
-        status VARCHAR(50),
-        urgente VARCHAR(3),
-        quantidade DECIMAL(10,2),
-        outroBairro VARCHAR(255),
-        voltagem VARCHAR(50),
-        bairro VARCHAR(50),
-        tipoEstado VARCHAR(50),
-        novo TINYINT(1),
-        usado TINYINT(1),
-        troca VARCHAR(3),
-        nf VARCHAR(3),
-        sujo VARCHAR(3),
-        mofo TINYINT(1),
-        cupim TINYINT(1),
-        trincado TINYINT(1),
-        linksProduto TEXT,
-        fotosProduto TEXT
-    )
-    """)
+        # Criar tabela fichas se não existir
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS fichas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(255),
+            cpf VARCHAR(14),
+            telefone VARCHAR(20),
+            email VARCHAR(255),
+            produto VARCHAR(255),
+            desmontagem VARCHAR(3),
+            marca VARCHAR(255),
+            dtCompra DATE,
+            valor DECIMAL(10,2),
+            valorEstimado DECIMAL(10,2),
+            marcaUso VARCHAR(255),
+            descricao TEXT,
+            altura DECIMAL(10,2),
+            largura DECIMAL(10,2),
+            profundidade DECIMAL(10,2),
+            foto1 LONGTEXT,
+            status VARCHAR(50),
+            urgente VARCHAR(3),
+            quantidade DECIMAL(10,2),
+            outroBairro VARCHAR(255),
+            voltagem VARCHAR(50),
+            bairro VARCHAR(50),
+            tipoEstado VARCHAR(50),
+            novo TINYINT(1),
+            usado TINYINT(1),
+            troca VARCHAR(3),
+            nf VARCHAR(3),
+            sujo VARCHAR(3),
+            mofo TINYINT(1),
+            cupim TINYINT(1),
+            trincado TINYINT(1),
+            linksProduto TEXT,
+            fotosProduto TEXT
+        )
+        """)
 
-    mysql.connection.commit()
-    cur.close()
+        mysql.connection.commit()
+        logger.info("Tabelas criadas/verificadas com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao criar tabelas: {str(e)}")
+    finally:
+        if 'cur' in locals():
+            cur.close()
 
 
 def check_chrome_version():
