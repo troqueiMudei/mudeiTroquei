@@ -26,7 +26,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-mysql_url = os.getenv('MYSQL_URL')
+mysql_url = os.getenv('MYSQLURL')
 if not mysql_url:
     logger.error("MYSQL_URL não está definida!")
 else:
