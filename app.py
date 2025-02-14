@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import logger
 import requests
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_mysqldb import MySQL
@@ -18,18 +19,36 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-mysql_url = os.getenv('MYSQL_URL', 'mysql://root:password@containers-us-west-207.railway.app:3306/railway')
-app.config['SQLALCHEMY_DATABASE_URI'] = mysql_url
-app.config['MYSQL_HOST'] = os.getenv('MYSQLHOST').replace('mysql.railway.internal', 'containers-us-west-207.railway.app')
-app.config['MYSQL_USER'] = os.getenv('MYSQLUSER', 'root')
-app.config['MYSQL_PASSWORD'] = os.getenv('MYSQLPASSWORD', 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji')
-app.config['MYSQL_DB'] = os.getenv('MYSQLDATABASE', 'railway')
-app.config['MYSQL_PORT'] = int(os.getenv('MYSQLPORT', '3306'))
-app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+mysql_url = os.getenv('MYSQL_URL')
+if not mysql_url:
+    logger.error("MYSQL_URL não está definida!")
+else:
+    logger.info(f"MySQL URL configurada: {mysql_url}")
+
+try:
+    # Parse da URL do MySQL para extrair os componentes
+    from urllib.parse import urlparse
+
+    parsed = urlparse(mysql_url)
+
+    app.config['MYSQL_HOST'] = parsed.hostname
+    app.config['MYSQL_USER'] = parsed.username
+    app.config['MYSQL_PASSWORD'] = parsed.password
+    app.config['MYSQL_DB'] = parsed.path.lstrip('/')
+    app.config['MYSQL_PORT'] = parsed.port or 3306
+    app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+
+    logger.info(
+        f"Configuração MySQL: Host={app.config['MYSQL_HOST']}, Port={app.config['MYSQL_PORT']}, DB={app.config['MYSQL_DB']}")
+except Exception as e:
+    logger.error(f"Erro ao configurar MySQL: {str(e)}")
 
 mysql = MySQL(app)
 
@@ -93,6 +112,7 @@ BAIRROS = {
     54: "Rocha Miranda",
     55: "Higienópolis"
 }
+
 
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
@@ -307,6 +327,7 @@ class ProdutoFinder:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
             return []
 
+
 # Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)
@@ -315,6 +336,7 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -331,13 +353,16 @@ def login():
 
     return render_template('login.html')
 
+
 # Instância do ProdutoFinder
 finder = ProdutoFinder()
+
 
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)  # Remove o status de logado da sessão
     return redirect(url_for('login'))
+
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_produto():
@@ -547,6 +572,34 @@ def check_chrome_version():
         logger.info(f"ChromeDriver version: {chromedriver_version}")
     except Exception as e:
         logger.error(f"Error checking versions: {str(e)}")
+
+
+@app.route('/test-db')
+def test_db():
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute('SELECT 1')
+        result = cur.fetchone()
+        cur.close()
+        return {
+            'status': 'success',
+            'message': 'Conexão com banco de dados estabelecida',
+            'config': {
+                'host': app.config['MYSQL_HOST'],
+                'port': app.config['MYSQL_PORT'],
+                'database': app.config['MYSQL_DB']
+            }
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e),
+            'config': {
+                'host': app.config['MYSQL_HOST'],
+                'port': app.config['MYSQL_PORT'],
+                'database': app.config['MYSQL_DB']
+            }
+        }
 
 
 if __name__ == '__main__':
