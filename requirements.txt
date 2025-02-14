@@ -8,5 +8,5 @@ python-dotenv==1.0.0
 Werkzeug==2.3.7
 SQLAlchemy==2.0.21
 gunicorn==21.2.0
-selenium==4.15.2
-webdriver-manager==4.0.1
+selenium==4.11.2
+webdriver-manager==4.0.0

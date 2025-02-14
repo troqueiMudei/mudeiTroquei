@@ -1,6 +1,9 @@
 # Use uma imagem base mais leve do Python
 FROM python:3.10-slim
 
+# Definir variáveis de ambiente para evitar interação durante a instalação
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Instalar dependências do sistema, Chrome e MySQL
 RUN apt-get update && apt-get install -y \
     wget \
@@ -15,6 +18,8 @@ RUN apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     pkg-config \
     build-essential \
+    python3-dev \
+    default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar o Chrome
@@ -26,6 +31,9 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 
 # Configurar diretório de trabalho
 WORKDIR /app
+
+# Instalar wheel primeiro
+RUN pip install --no-cache-dir wheel setuptools --upgrade
 
 # Copiar requirements.txt primeiro para aproveitar o cache do Docker
 COPY requirements.txt .
