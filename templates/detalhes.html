@@ -3,16 +3,6 @@
 <div class="container mx-auto px-4">
     <h1 class="text-2xl font-bold mb-4"><br>Detalhes da Ficha</h1>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="mb-4 p-4 rounded-lg {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
-                    {{ message }}
-                </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
     <div class="bg-white p-6 rounded-lg shadow">
         <!-- Imagem principal da ficha -->
         {% if ficha.foto1 %}
@@ -42,10 +32,10 @@
                 <p><strong>Marca:</strong> {{ ficha.marca }}</p>
                 <p><strong>Data da Compra:</strong> {{ ficha.dtCompra_br }}</p>  <!-- Data no formato brasileiro -->
                 <p><strong>Bairro Alternativo:</strong> {{ ficha.outroBairro }}</p>
-                <p><strong>Valor Ofertado:</strong> R$ {{ "%.2f"|format(ficha.valor|float) }}</p>
+                <p><strong>Valor Ofertado:</strong> R$ {{ "%.2f"|format(ficha.valor) }}</p>
                 <p><strong>Valor Estimado:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado) }}</p>
-                <p><strong>Valor Comercial:</strong> R$ {{ "%.2f"|format(ficha.valor|float) }}</p>
-                <p><strong>Valor para Venda:</strong> R$ {{ "%.2f"|format(ficha.valor_venda) }}</p>
+                <p><strong>Valor Comercial:</strong> R$ {{ "%.2f"|format(ficha.valor) }}</p>
+                <p><strong>Valor para Venda:</strong> R$ {{ "%.2f"|format(ficha.valorEstimado + 192.5) }}</p>
             </div>
         </div>
 
@@ -104,21 +94,22 @@
         </div>
 
         <!-- Status e Demanda -->
-    <div class="mb-8">
-        <h2 class="text-xl font-semibold mb-4">Atualizar Status</h2>
-        <form method="POST" action="{{ url_for('atualizar_status', id=ficha.id) }}" class="space-y-4">
-            <div>
-                <label for="status" class="block text-sm font-medium text-gray-700">Status:</label>
-                <select name="status" id="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
-                    <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Análise</option>
-                    <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
-                    <option value="Recusado" {% if ficha.status == 'Recusado' %}selected{% endif %}>Recusado</option>
-                </select>
-            </div>
-            <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+<div class="mb-8">
+    <h2 class="text-xl font-semibold mb-4">Status e Demanda</h2>
+    <div class="space-y-4">
+        <!-- Formulário para alterar o status -->
+        <form method="POST" action="{{ url_for('atualizar_status', id=ficha.id) }}">
+            <label for="status" class="block text-sm font-medium text-gray-700">Alterar Status:</label>
+            <select name="status" id="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500">
+                <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Análise</option>
+                <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
+                <option value="Recusado" {% if ficha.status == 'Recusado' %}selected{% endif %}>Recusado</option>
+            </select>
+            <button type="submit" class="mt-2 inline-block bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors">
                 Atualizar Status
             </button>
         </form>
+        </div>
     </div>
 
         <!-- Produtos encontrados -->
