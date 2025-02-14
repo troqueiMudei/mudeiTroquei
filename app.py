@@ -108,17 +108,26 @@ class ProdutoFinder:
         chrome_options.add_argument(
             'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-        # Updated Chrome driver initialization
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        self.wait = WebDriverWait(self.driver, 10)
+        # Configurar o caminho binário do Chrome
+        chrome_options.binary_location = "/usr/bin/google-chrome"
+
+        try:
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            self.wait = WebDriverWait(self.driver, 10)
+            logger.info("Driver do Chrome inicializado com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao inicializar o driver do Chrome: {str(e)}")
+            raise
 
     def __del__(self):
         try:
-            self.driver.quit()
-        except:
-            pass
+            if hasattr(self, 'driver'):
+                self.driver.quit()
+                logger.info("Driver do Chrome fechado com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao fechar o driver do Chrome: {str(e)}")
 
     def _convert_image_to_url(self, image):
         try:
