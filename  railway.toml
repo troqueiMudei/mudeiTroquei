@@ -1,9 +1,0 @@
-[build]
-builder = "nixpacks"
-buildCommand = "apt-get update && apt-get install -y default-libmysqlclient-dev pkg-config build-essential python3-dev"
-
-[deploy]
-startCommand = "gunicorn app:app"
-healthcheckPath = "/"
-healthcheckTimeout = 100
-restartPolicyType = "on-failure"
