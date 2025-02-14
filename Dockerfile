@@ -1,7 +1,7 @@
 # Use uma imagem base mais leve do Python
 FROM python:3.10-slim
 
-# Instalar dependências do sistema e do Chrome
+# Instalar dependências do sistema, Chrome e MySQL
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg2 \
@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     libfontconfig1 \
     libxss1 \
     libasound2 \
+    default-libmysqlclient-dev \
+    pkg-config \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar o Chrome
