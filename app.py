@@ -531,6 +531,16 @@ def create_tables():
     cur.close()
 
 
+def check_chrome_version():
+    try:
+        chrome_version = os.popen('google-chrome --version').read().strip()
+        logger.info(f"Chrome version: {chrome_version}")
+        chromedriver_version = os.popen('chromedriver --version').read().strip()
+        logger.info(f"ChromeDriver version: {chromedriver_version}")
+    except Exception as e:
+        logger.error(f"Error checking versions: {str(e)}")
+
+
 if __name__ == '__main__':
     with app.app_context():
         create_tables()
