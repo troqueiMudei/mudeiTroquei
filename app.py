@@ -22,7 +22,9 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-app.config['MYSQL_HOST'] = os.getenv('MYSQLHOST', 'mysql.railway.internal')
+mysql_url = os.getenv('MYSQL_URL', 'mysql://root:password@containers-us-west-207.railway.app:3306/railway')
+app.config['SQLALCHEMY_DATABASE_URI'] = mysql_url
+app.config['MYSQL_HOST'] = os.getenv('MYSQLHOST').replace('mysql.railway.internal', 'containers-us-west-207.railway.app')
 app.config['MYSQL_USER'] = os.getenv('MYSQLUSER', 'root')
 app.config['MYSQL_PASSWORD'] = os.getenv('MYSQLPASSWORD', 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji')
 app.config['MYSQL_DB'] = os.getenv('MYSQLDATABASE', 'railway')
