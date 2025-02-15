@@ -5,14 +5,12 @@ ENV PYTHONUNBUFFERED=1
 ENV CHROME_VERSION="133.0.6943.98-1"
 ENV CHROMEDRIVER_VERSION="133.0.6943.98"
 
-ENV PYTHONPATH=/app
-ENV DISPLAY=:99
-ENV CHROME_PATH=/usr/bin/google-chrome
-ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
-
 # Chrome environment setup
 ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
+ENV PYTHONPATH=/app
+ENV DISPLAY=:99
+ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
 
 # Create required directories with proper permissions
 RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm /tmp/chrome && \
@@ -73,25 +71,19 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Adicionar estas linhas após a instalação do Chrome
-RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
-    && echo '{"download_prompt_for_download": false, "download.default_directory": "/tmp/downloads"}' > /home/chrome_user/.config/google-chrome/Default/Preferences \
-    && chown -R chrome_user:chrome_user /home/chrome_user/.config
-
-# Modificar as permissões do chromedriver
-RUN chmod 755 /usr/local/bin/chromedriver
-
 # Install ChromeDriver
 RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
     && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
     && mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod +x /usr/local/bin/chromedriver \
+    && chmod 755 /usr/local/bin/chromedriver \
     && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
-# Set up chrome user with proper permissions
+# Create chrome user and set up directories
 RUN useradd -m -s /bin/bash chrome_user \
-    && mkdir -p /home/chrome_user/.config/google-chrome \
+    && mkdir -p /home/chrome_user/.config/google-chrome/Default \
+    && echo '{"download_prompt_for_download": false, "download.default_directory": "/tmp/downloads"}' > /home/chrome_user/.config/google-chrome/Default/Preferences \
     && chown -R chrome_user:chrome_user /home/chrome_user \
+    && chown -R chrome_user:chrome_user /home/chrome_user/.config \
     && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
     && chown -R chrome_user:chrome_user /var/run/chrome \
     && chown -R chrome_user:chrome_user /data \
