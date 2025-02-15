@@ -1,7 +1,6 @@
 import os
 import re
 import time
-import logger
 import requests
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_mysqldb import MySQL
