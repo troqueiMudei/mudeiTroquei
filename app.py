@@ -26,29 +26,18 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-mysql_url = os.getenv('MYSQLURL')
-if not mysql_url:
-    logger.error("MYSQL_URL não está definida!")
-else:
-    logger.info(f"MySQL URL configurada: {mysql_url}")
+app.config['MYSQL_HOST'] = os.getenv('MYSQLHOST', 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@mysql')
+app.config['MYSQL_USER'] = os.getenv('MYSQLUSER', 'root')
+app.config['MYSQL_PASSWORD'] = os.getenv('MYSQLPASSWORD', 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji')
+app.config['MYSQL_DB'] = os.getenv('MYSQLDATABASE', 'railway')
+app.config['MYSQL_PORT'] = int(os.getenv('MYSQLPORT', '3306'))
+app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 
-try:
-    # Parse da URL do MySQL para extrair os componentes
-    from urllib.parse import urlparse
-
-    parsed = urlparse(mysql_url)
-
-    app.config['MYSQL_HOST'] = parsed.hostname
-    app.config['MYSQL_USER'] = parsed.username
-    app.config['MYSQL_PASSWORD'] = parsed.password
-    app.config['MYSQL_DB'] = parsed.path.lstrip('/')
-    app.config['MYSQL_PORT'] = parsed.port or 3306
-    app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
-
-    logger.info(
-        f"Configuração MySQL: Host={app.config['MYSQL_HOST']}, Port={app.config['MYSQL_PORT']}, DB={app.config['MYSQL_DB']}")
-except Exception as e:
-    logger.error(f"Erro ao configurar MySQL: {str(e)}")
+# Adicionar logs para debug
+logger.info(f"MySQL Host: {app.config['MYSQL_HOST']}")
+logger.info(f"MySQL User: {app.config['MYSQL_USER']}")
+logger.info(f"MySQL Database: {app.config['MYSQL_DB']}")
+logger.info(f"MySQL Port: {app.config['MYSQL_PORT']}")
 
 mysql = MySQL(app)
 

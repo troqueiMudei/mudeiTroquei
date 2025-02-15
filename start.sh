@@ -1,16 +1,13 @@
 #!/bin/bash
 
-# Extrair o host da URL do MySQL
-MYSQL_HOST=$(echo $MYSQL_URL | sed -E 's/.*@([^:]+).*/\1/')
-
-echo "Tentando conectar ao host: $MYSQL_HOST"
-
 # Aguardar o MySQL ficar disponível
-while ! mysqladmin ping -h"$MYSQL_HOST" -P"$MYSQLPORT" -u"$MYSQLUSER" -p"$MYSQLPASSWORD" --silent; do
+echo "Aguardando o MySQL ficar disponível..."
+while ! mysqladmin ping -h"$MYSQLHOST" -P"$MYSQLPORT" -u"$MYSQLUSER" -p"$MYSQLPASSWORD" --silent; do
     echo "Aguardando conexão com MySQL..."
-    echo "Host: $MYSQL_HOST"
+    echo "Host: $MYSQLHOST"
     echo "Port: $MYSQLPORT"
     echo "User: $MYSQLUSER"
+    echo "Database: $MYSQLDATABASE"
     sleep 2
 done
 
