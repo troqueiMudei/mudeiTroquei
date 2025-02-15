@@ -23,6 +23,25 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     default-mysql-client \
     curl \
+    # Additional dependencies for Chrome stability
+    libglib2.0-0 \
+    libnss3 \
+    libgbm1 \
+    libasound2 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    libfreetype6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome
@@ -39,6 +58,10 @@ RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROM
     && chmod +x /usr/local/bin/chromedriver \
     && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
+# Create a non-root user
+RUN useradd -m -s /bin/bash chrome_user \
+    && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver
+
 WORKDIR /app
 
 # Install Python dependencies
@@ -48,6 +71,10 @@ RUN pip install --no-cache-dir -U pip setuptools wheel && \
 
 # Copy application code
 COPY . .
+RUN chown -R chrome_user:chrome_user /app
+
+# Switch to non-root user
+USER chrome_user
 
 # Make start script executable
 RUN chmod +x start.sh
