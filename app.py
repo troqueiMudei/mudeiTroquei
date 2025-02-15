@@ -108,6 +108,49 @@ class ProdutoFinder:
         self.max_retries = 3
         self.page_load_timeout = 40
 
+    def _convert_image_to_url(self, image):
+        """
+        Converte uma imagem para URL usando o serviço imgbb
+        """
+        try:
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            img_buffer = io.BytesIO()
+            image.save(img_buffer, format='JPEG', quality=95)
+            img_buffer.seek(0)
+
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                    response = requests.post(
+                        'https://api.imgbb.com/1/upload',
+                        params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                        files=files,
+                        timeout=30
+                    )
+
+                    if response.status_code == 200:
+                        url = response.json()['data']['url']
+                        logger.info(f"Imagem convertida para URL: {url}")
+                        return url
+                    else:
+                        logger.error(f"Erro no upload da imagem: {response.status_code}")
+                        if attempt < retries - 1:
+                            time.sleep(2)
+                            continue
+                except Exception as e:
+                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+                        continue
+            return None
+
+        except Exception as e:
+            logger.error(f"Erro ao converter imagem: {str(e)}")
+            return None
+
     def _initialize_driver(self):
         chrome_options = Options()
 
@@ -208,6 +251,96 @@ class ProdutoFinder:
             return []
         finally:
             self.cleanup()  # Ensure cleanup after each search
+
+    def _extract_products_selenium(self):
+        """Extrai produtos usando XPath"""
+        products = []
+        try:
+            xpaths = [
+                "//div[contains(@class, 'isv-r')]",
+                "//div[@class='g' or contains(@class, 'g-card')]",
+                "//div[.//h3 or .//a[@href]]",
+                "//div[contains(@style, 'background-image')]",
+                "//a[.//img]"
+            ]
+
+            result_elements = []
+            for xpath in xpaths:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    if elements:
+                        result_elements.extend(elements)
+                        break
+                except Exception as e:
+                    continue
+
+            result_elements = list(set(result_elements))
+
+            for element in result_elements[:10]:
+                try:
+                    title = None
+                    for xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a",
+                                  ".//span[string-length(text()) > 10]"]:
+                        try:
+                            title_element = element.find_element(By.XPATH, xpath)
+                            title = title_element.text.strip()
+                            if title:
+                                break
+                        except:
+                            continue
+
+                    if not title:
+                        continue
+
+                    link = None
+                    try:
+                        link_element = element.find_element(By.XPATH, ".//a")
+                        link = link_element.get_attribute('href')
+                    except:
+                        try:
+                            link = element.get_attribute('href')
+                        except:
+                            continue
+
+                    price = None
+                    try:
+                        price_text = element.text
+                        price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
+                        if price_matches:
+                            price_str = price_matches[0]
+                            price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
+                    except:
+                        pass
+
+                    img = None
+                    try:
+                        img_element = element.find_element(By.XPATH, ".//img")
+                        img = img_element.get_attribute('src')
+                    except:
+                        try:
+                            style = element.get_attribute('style')
+                            if style and 'background-image' in style:
+                                img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
+                        except:
+                            pass
+
+                    if title and link:
+                        product = {
+                            "nome": title,
+                            "preco": price,
+                            "link": link,
+                            "imagem": img
+                        }
+                        products.append(product)
+
+                except Exception as e:
+                    continue
+
+            return products
+
+        except Exception as e:
+            logger.error(f"Erro ao extrair produtos: {str(e)}")
+            return []
 
 
 # Decorator para verificar se o usuário está logado
