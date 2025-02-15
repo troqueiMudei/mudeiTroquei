@@ -106,75 +106,67 @@ class ProdutoFinder:
     def __init__(self):
         chrome_options = Options()
 
-        # Basic headless configuration
-        chrome_options.add_argument('--headless=new')  # Use new headless mode
+        # Enhanced headless configuration
+        chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # Memory and process management
+        # Additional required flags for containerized environment
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-software-rasterizer')
         chrome_options.add_argument('--disable-dev-tools')
-        chrome_options.add_argument('--single-process')
-        chrome_options.add_argument('--deterministic-fetch')
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--no-default-browser-check')
+        chrome_options.add_argument('--remote-debugging-port=9222')
+        chrome_options.add_argument('--disable-extensions')
+
+        # Memory management
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        chrome_options.add_argument('--disable-accelerated-2d-canvas')
+        chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
+        chrome_options.add_argument('--disable-accelerated-mjpeg-decode')
+        chrome_options.add_argument('--disable-accelerated-video-decode')
+        chrome_options.add_argument('--disable-gpu-compositing')
         chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disable-background-networking')
-        chrome_options.add_argument('--disable-background-timer-throttling')
-        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-        chrome_options.add_argument('--disable-breakpad')
-        chrome_options.add_argument('--disable-component-extensions-with-background-pages')
 
-        # Security and stability
-        chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
-        chrome_options.add_argument('--disable-site-isolation-trials')
-        chrome_options.add_argument('--disable-setuid-sandbox')
-        chrome_options.add_argument('--disable-namespace-sandbox')
-        chrome_options.add_argument('--disable-seccomp-filter-sandbox')
-
-        # Performance optimization
-        chrome_options.add_argument('--disable-partial-raster')
-        chrome_options.add_argument('--disable-sync')
-        chrome_options.add_argument('--disable-hang-monitor')
-        chrome_options.add_argument('--ignore-certificate-errors')
-        chrome_options.add_argument('--disable-popup-blocking')
+        # Set window size and user agent
         chrome_options.add_argument('--window-size=1920,1080')
-
-        # Set realistic user agent
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
-        # Additional performance settings
+        # Disable images and other resource loading
         prefs = {
-            'profile.managed_default_content_settings.images': 2,  # Don't load images
-            'disk-cache-size': 4096,
+            'profile.managed_default_content_settings.images': 2,
             'profile.default_content_setting_values.notifications': 2,
-            'profile.default_content_setting_values.media_stream_mic': 2,
-            'profile.default_content_setting_values.media_stream_camera': 2,
-            'profile.default_content_setting_values.geolocation': 2,
-            'profile.default_content_setting_values.cookies': 2,
+            'profile.managed_default_content_settings.stylesheets': 2,
+            'profile.managed_default_content_settings.cookies': 2,
+            'profile.managed_default_content_settings.javascript': 1,
+            'profile.managed_default_content_settings.plugins': 3,
+            'profile.managed_default_content_settings.popups': 2,
+            'profile.managed_default_content_settings.geolocation': 2,
+            'profile.managed_default_content_settings.media_stream': 2,
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
         try:
-            service = Service('/usr/local/bin/chromedriver')
+            service = Service(executable_path='/usr/local/bin/chromedriver')
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(30)
-            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'})
             self.wait = WebDriverWait(self.driver, 10)
-            logger.info("Driver do Chrome inicializado com sucesso")
+            logger.info("Chrome driver initialized successfully")
         except Exception as e:
-            logger.error(f"Erro ao inicializar o driver do Chrome: {str(e)}")
-            raise
+            logger.error(f"Failed to initialize Chrome driver: {str(e)}")
+            # Instead of raising, we'll set driver to None
+            self.driver = None
 
     def __del__(self):
         try:
-            if hasattr(self, 'driver'):
+            if hasattr(self, 'driver') and self.driver is not None:
                 self.driver.quit()
-                logger.info("Driver do Chrome fechado com sucesso")
+                logger.info("Chrome driver closed successfully")
         except Exception as e:
-            logger.error(f"Erro ao fechar o driver do Chrome: {str(e)}")
+            logger.error(f"Error closing Chrome driver: {str(e)}")
 
     def _convert_image_to_url(self, image):
         try:
