@@ -106,6 +106,7 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
+        self.page_load_timeout = 40
         self._initialize_driver()
 
     def _initialize_driver(self):
@@ -116,22 +117,17 @@ class ProdutoFinder:
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # Configurações adicionais para estabilidade
+        # Configurações para melhorar a estabilidade
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--ignore-certificate-errors')
         chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-infobars')
 
-        # Configurações de memória e cache
-        chrome_options.add_argument('--disable-dev-tools')
-        chrome_options.add_argument('--no-zygote')
-        chrome_options.add_argument('--single-process')
-        chrome_options.add_argument('--disable-setuid-sandbox')
-
-        # Configurações de rede
-        chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--allow-running-insecure-content')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        # Configurações de proxy (adicione se necessário)
+        chrome_options.add_argument('--proxy-server="direct://"')
+        chrome_options.add_argument('--proxy-bypass-list=*')
 
         # Configurações de performance
         prefs = {
@@ -140,13 +136,11 @@ class ProdutoFinder:
             'disk-cache-size': 4096,
             'profile.password_manager_enabled': False,
             'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False
+            'download.prompt_for_download': False,
+            'download.default_directory': '/tmp/downloads',
+            'javascript.enabled': True
         }
         chrome_options.add_experimental_option('prefs', prefs)
-
-        # Desabilitar logs
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
 
         for attempt in range(3):
             try:
@@ -160,16 +154,24 @@ class ProdutoFinder:
                     options=chrome_options
                 )
 
-                # Configurar timeouts
-                self.driver.set_page_load_timeout(30)
-                self.driver.implicitly_wait(10)
+                # Configurar timeouts mais longos
+                self.driver.set_page_load_timeout(self.page_load_timeout)
+                self.driver.implicitly_wait(20)
 
-                # Testar a conexão
-                self.driver.get('about:blank')
-                return True
+                # Testar a conexão com retry
+                max_test_attempts = 3
+                for test_attempt in range(max_test_attempts):
+                    try:
+                        self.driver.get('about:blank')
+                        return True
+                    except Exception as e:
+                        if test_attempt == max_test_attempts - 1:
+                            raise
+                        time.sleep(2)
+                        continue
 
             except Exception as e:
-                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                logger.error(f"Tentativa {attempt + 1} de inicialização falhou: {str(e)}")
                 if self.driver:
                     try:
                         self.driver.quit()
@@ -181,7 +183,7 @@ class ProdutoFinder:
                     logger.error("Falha ao inicializar Chrome driver após todas as tentativas")
                     return False
 
-                time.sleep(2)
+                time.sleep(3)  # Aumentado o tempo de espera entre tentativas
 
         return False
 
@@ -234,10 +236,10 @@ class ProdutoFinder:
 
     def buscar_produtos(self, imagem):
         if not self.driver:
-            logger.error("Chrome driver not initialized, attempting to reinitialize")
+            logger.error("Chrome driver não inicializado, tentando reinicializar")
             self._initialize_driver()
             if not self.driver:
-                logger.error("Failed to reinitialize Chrome driver")
+                logger.error("Falha ao reinicializar Chrome driver")
                 return []
 
         try:
@@ -250,31 +252,53 @@ class ProdutoFinder:
 
             for attempt in range(self.max_retries):
                 try:
-                    self.driver.get(search_url)
-                    time.sleep(5)  # Reduced wait time
+                    # Limpar cookies e cache antes de cada tentativa
+                    self.driver.delete_all_cookies()
+
+                    # Tentar carregar a página com retry
+                    load_attempts = 3
+                    for load_attempt in range(load_attempts):
+                        try:
+                            self.driver.get(search_url)
+                            break
+                        except Exception as e:
+                            if load_attempt == load_attempts - 1:
+                                raise
+                            time.sleep(2)
+                            continue
+
+                    # Esperar mais tempo para a página carregar
+                    time.sleep(8)
 
                     products = self._extract_products_selenium()
                     if products:
                         return products
 
                     if attempt < self.max_retries - 1:
-                        logger.warning(f"No products found on attempt {attempt + 1}, retrying...")
-                        time.sleep(2)
+                        logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}, tentando novamente...")
+                        time.sleep(3)
                         continue
 
                 except Exception as e:
-                    logger.error(f"Error on attempt {attempt + 1}: {str(e)}")
+                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
                     if attempt < self.max_retries - 1:
-                        self._initialize_driver()  # Reinitialize driver on error
-                        time.sleep(2)
+                        self._initialize_driver()
+                        time.sleep(3)
                         continue
 
-            logger.warning("No products found after all attempts")
+            logger.warning("Nenhum produto encontrado após todas as tentativas")
             return []
 
         except Exception as e:
-            logger.error(f"Error in product search: {str(e)}")
+            logger.error(f"Erro na busca de produtos: {str(e)}")
             return []
+
+        finally:
+            try:
+                if self.driver:
+                    self.driver.delete_all_cookies()
+            except:
+                pass
 
     def _extract_products_selenium(self):
         """Extrai produtos usando XPath"""
