@@ -11,8 +11,9 @@ ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
 ENV CHROMIUM_FLAGS="--headless --no-sandbox --disable-gpu --disable-software-rasterizer"
 
-# System configurations for Chrome
-RUN echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
+# Create sysctl.d directory and set system configurations for Chrome
+RUN mkdir -p /etc/sysctl.d && \
+    echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
     echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
 
 # Install system dependencies
