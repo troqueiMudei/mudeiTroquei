@@ -17,6 +17,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import MySQLdb.cursors
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -462,7 +463,9 @@ def upload_produto():
 @login_required
 def lista_cadastros():
     status_filtro = request.args.get('status')
-    cur = mysql.connection.cursor()
+
+    # Usar DictCursor para retornar resultados como dicionários
+    cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
 
     if status_filtro:
         cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
