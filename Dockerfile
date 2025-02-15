@@ -6,7 +6,16 @@ ENV PYTHONUNBUFFERED=1
 ENV CHROME_VERSION="133.0.6943.98-1"
 ENV CHROMEDRIVER_VERSION="133.0.6943.98"
 
-# Install system dependencies in a single layer
+# Set up Chrome environment variables
+ENV CHROME_BIN=/usr/bin/google-chrome
+ENV CHROME_PATH=/usr/lib/google-chrome
+ENV CHROMIUM_FLAGS="--headless --no-sandbox --disable-gpu --disable-software-rasterizer"
+
+# System configurations for Chrome
+RUN echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
+    echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg2 \
@@ -23,7 +32,6 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     default-mysql-client \
     curl \
-    # Additional dependencies for Chrome stability
     libglib2.0-0 \
     libnss3 \
     libgbm1 \
@@ -39,12 +47,18 @@ RUN apt-get update && apt-get install -y \
     libxi6 \
     libxrandr2 \
     libxrender1 \
-    libxss1 \
     libxtst6 \
     libfreetype6 \
+    xdg-utils \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libgtk-3-0 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome
+# Install Chrome with specific version
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
@@ -58,10 +72,11 @@ RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROM
     && chmod +x /usr/local/bin/chromedriver \
     && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
-# Create a non-root user
+# Create and switch to chrome user
 RUN useradd -m -s /bin/bash chrome_user \
     && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver
 
+# Set up working directory
 WORKDIR /app
 
 # Install Python dependencies
@@ -73,7 +88,7 @@ RUN pip install --no-cache-dir -U pip setuptools wheel && \
 COPY . .
 RUN chown -R chrome_user:chrome_user /app
 
-# Switch to non-root user
+# Switch to chrome user
 USER chrome_user
 
 # Make start script executable

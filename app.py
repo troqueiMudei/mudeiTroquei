@@ -105,36 +105,63 @@ BAIRROS = {
 class ProdutoFinder:
     def __init__(self):
         chrome_options = Options()
-        chrome_options.add_argument('--headless')
+
+        # Basic headless configuration
+        chrome_options.add_argument('--headless=new')  # Use new headless mode
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+
+        # Memory and process management
         chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-infobars')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-browser-side-navigation')
-        chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
         chrome_options.add_argument('--disable-software-rasterizer')
-        # Additional stability options
-        chrome_options.add_argument('--single-process')
-        chrome_options.add_argument('--disable-setuid-sandbox')
-        chrome_options.add_argument('--disable-seccomp-filter-sandbox')
-        chrome_options.add_argument('--disable-breakpad')
-        chrome_options.add_argument('--ignore-certificate-errors')
         chrome_options.add_argument('--disable-dev-tools')
-        chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--log-level=3')
-        chrome_options.add_argument('--silent')
-        chrome_options.add_argument('--disable-crash-reporter')
-        chrome_options.add_argument('--disable-permissions-api')
-        chrome_options.add_argument('--disable-component-update')
+        chrome_options.add_argument('--single-process')
+        chrome_options.add_argument('--deterministic-fetch')
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-breakpad')
+        chrome_options.add_argument('--disable-component-extensions-with-background-pages')
+
+        # Security and stability
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+        chrome_options.add_argument('--disable-site-isolation-trials')
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--disable-namespace-sandbox')
+        chrome_options.add_argument('--disable-seccomp-filter-sandbox')
+
+        # Performance optimization
+        chrome_options.add_argument('--disable-partial-raster')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--disable-hang-monitor')
+        chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_argument('--window-size=1920,1080')
+
+        # Set realistic user agent
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
+
+        # Additional performance settings
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,  # Don't load images
+            'disk-cache-size': 4096,
+            'profile.default_content_setting_values.notifications': 2,
+            'profile.default_content_setting_values.media_stream_mic': 2,
+            'profile.default_content_setting_values.media_stream_camera': 2,
+            'profile.default_content_setting_values.geolocation': 2,
+            'profile.default_content_setting_values.cookies': 2,
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
 
         try:
             service = Service('/usr/local/bin/chromedriver')
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(30)
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'})
             self.wait = WebDriverWait(self.driver, 10)
             logger.info("Driver do Chrome inicializado com sucesso")
         except Exception as e:
