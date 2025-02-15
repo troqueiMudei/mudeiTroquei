@@ -13,9 +13,8 @@ ENV DISPLAY=:99
 ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
 ENV CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer"
 ENV TZ=America/Sao_Paulo
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-RUN mkdir -p /dev/shm && mount -t tmpfs -o rw,nosuid,nodev,noexec,relatime,size=512M tmpfs /dev/shm
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Create required directories with proper permissions
 RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm /tmp/chrome && \
