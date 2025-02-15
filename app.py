@@ -107,7 +107,67 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 40
+        self.page_load_timeout = 90  # Aumentado para 60 segundos
+
+    def _initialize_driver(self):
+        chrome_options = Options()
+
+        # Essential configurations
+        chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+
+        # Performance improvements
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-browser-side-navigation')
+        chrome_options.add_argument('--disable-features=NetworkService')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        chrome_options.add_argument('--force-device-scale-factor=1')
+
+        # Memory optimization
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disk-cache-size=1')
+        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--disable-application-cache')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-logging')
+
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,
+            'profile.default_content_settings.images': 2,
+            'disk-cache-size': 1,
+            'profile.password_manager_enabled': False,
+            'profile.default_content_settings.popups': 2,
+            'download.prompt_for_download': False,
+            'download.default_directory': '/tmp/downloads'
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
+
+        try:
+            service = Service(
+                executable_path='/usr/local/bin/chromedriver',
+                log_path='/dev/null'
+            )
+
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
+
+            self.driver.set_page_load_timeout(self.page_load_timeout)
+            self.driver.set_script_timeout(self.page_load_timeout)
+            self.driver.implicitly_wait(20)  # Aumentado para 20 segundos
+
+            return True
+        except Exception as e:
+            logger.error(f"Driver initialization failed: {str(e)}")
+            if self.driver:
+                self.driver.quit()
+            return False
 
     def _convert_image_to_url(self, image):
         """
@@ -152,57 +212,6 @@ class ProdutoFinder:
             logger.error(f"Erro ao converter imagem: {str(e)}")
             return None
 
-    def _initialize_driver(self):
-        chrome_options = Options()
-
-        # Essential configurations
-        chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-
-        # Memory optimization
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
-        chrome_options.add_argument('--disable-application-cache')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-logging')
-
-        # Performance settings
-        prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2,
-            'disk-cache-size': 1,
-            'profile.password_manager_enabled': False,
-            'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads'
-        }
-        chrome_options.add_experimental_option('prefs', prefs)
-
-        try:
-            service = Service(
-                executable_path='/usr/local/bin/chromedriver',
-                log_path='/dev/null'  # Disable logging
-            )
-
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
-
-            self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(10)
-
-            return True
-        except Exception as e:
-            logger.error(f"Driver initialization failed: {str(e)}")
-            if self.driver:
-                self.driver.quit()
-            return False
-
     def __del__(self):
         self.cleanup()
 
@@ -232,58 +241,78 @@ class ProdutoFinder:
             for attempt in range(self.max_retries):
                 try:
                     self.driver.delete_all_cookies()
-                    self.driver.get(search_url)
-                    time.sleep(5)  # Reduced wait time
 
-                    products = self._extract_products_selenium()
+                    # Adiciona tratamento de timeout na navegação
+                    try:
+                        self.driver.get(search_url)
+                    except Exception as e:
+                        logger.error(f"Navigation timeout on attempt {attempt + 1}: {str(e)}")
+                        continue
+
+                    # Espera explícita por elementos
+                    time.sleep(10)  # Espera inicial
+
+                    # Tenta extrair produtos com diferentes tempos de espera
+                    for wait_time in [5, 10, 15]:
+                        products = self._extract_products_selenium()
+                        if products:
+                            break
+                        time.sleep(wait_time)
+
                     if products:
                         break
 
-                    time.sleep(2)
                 except Exception as e:
                     logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
                     if attempt < self.max_retries - 1:
                         self._initialize_driver()
+                    time.sleep(5)  # Espera entre tentativas
 
-            return products[:5]  # Limit results to reduce memory usage
+            return products[:5]  # Limita resultados para reduzir uso de memória
 
         except Exception as e:
             logger.error(f"Product search failed: {str(e)}")
             return []
         finally:
-            self.cleanup()  # Ensure cleanup after each search
+            self.cleanup()
 
     def _extract_products_selenium(self):
-        """Extrai produtos usando XPath"""
         products = []
         try:
+            # Tenta diferentes estratégias de localização
             xpaths = [
                 "//div[contains(@class, 'isv-r')]",
                 "//div[@class='g' or contains(@class, 'g-card')]",
                 "//div[.//h3 or .//a[@href]]",
                 "//div[contains(@style, 'background-image')]",
-                "//a[.//img]"
+                "//a[.//img]",
+                "//div[contains(@class, 'photo-result')]"  # Adicionado novo seletor
             ]
 
-            result_elements = []
             for xpath in xpaths:
                 try:
-                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    elements = WebDriverWait(self.driver, 20).until(
+                        lambda d: d.find_elements(By.XPATH, xpath)
+                    )
                     if elements:
-                        result_elements.extend(elements)
+                        result_elements = elements
                         break
-                except Exception as e:
+                except:
                     continue
+            else:
+                return []
 
-            result_elements = list(set(result_elements))
+            result_elements = list(set(result_elements))[:10]
 
-            for element in result_elements[:10]:
+            for element in result_elements:
                 try:
+                    # Extração do título com espera explícita
                     title = None
-                    for xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a",
-                                  ".//span[string-length(text()) > 10]"]:
+                    for title_xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a"]:
                         try:
-                            title_element = element.find_element(By.XPATH, xpath)
+                            title_element = WebDriverWait(element, 5).until(
+                                lambda d: element.find_element(By.XPATH, title_xpath)
+                            )
                             title = title_element.text.strip()
                             if title:
                                 break
@@ -293,6 +322,7 @@ class ProdutoFinder:
                     if not title:
                         continue
 
+                    # Resto do código de extração permanece o mesmo
                     link = None
                     try:
                         link_element = element.find_element(By.XPATH, ".//a")
@@ -303,34 +333,12 @@ class ProdutoFinder:
                         except:
                             continue
 
-                    price = None
-                    try:
-                        price_text = element.text
-                        price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
-                        if price_matches:
-                            price_str = price_matches[0]
-                            price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
-                    except:
-                        pass
-
-                    img = None
-                    try:
-                        img_element = element.find_element(By.XPATH, ".//img")
-                        img = img_element.get_attribute('src')
-                    except:
-                        try:
-                            style = element.get_attribute('style')
-                            if style and 'background-image' in style:
-                                img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
-                        except:
-                            pass
-
                     if title and link:
                         product = {
                             "nome": title,
-                            "preco": price,
+                            "preco": None,
                             "link": link,
-                            "imagem": img
+                            "imagem": None
                         }
                         products.append(product)
 
