@@ -1,9 +1,6 @@
 import os
 import re
 import time
-from asyncio.timeouts import timeout
-import signal
-from contextlib import contextmanager
 import requests
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_mysqldb import MySQL
@@ -103,56 +100,13 @@ BAIRROS = {
     55: "Higienópolis"
 }
 
-class TimeoutException(Exception):
-    pass
-
-
-@contextmanager
-def timeout(seconds):
-    def timeout_handler(signum, frame):
-        raise TimeoutException("Timed out!")
-
-    # Set the timeout handler
-    original_handler = signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(seconds)
-
-    try:
-        yield
-    finally:
-        # Restore the original handler and cancel the alarm
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, original_handler)
 
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 60  # Aumentado para 60 segundos
-        self.script_timeout = 30
-        self.implicit_wait = 20
-
-    def _load_page_with_retry(self, url, max_attempts=3):
-        """Tenta carregar a página com retry e tratamento de timeout"""
-        for attempt in range(max_attempts):
-            try:
-                self.driver.delete_all_cookies()
-                self.driver.get("about:blank")  # Limpa a página atual
-
-                # Tenta carregar a URL com timeout reduzido
-                with timeout(self.page_load_timeout):
-                    self.driver.get(url)
-                    # Espera até que o body esteja presente
-                    WebDriverWait(self.driver, 10).until(
-                        lambda d: d.find_element(By.TAG_NAME, "body")
-                    )
-                return True
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} to load page failed: {str(e)}")
-                if attempt == max_attempts - 1:
-                    return False
-                time.sleep(2)
-        return False
+        self.page_load_timeout = 40
 
     def _convert_image_to_url(self, image):
         """
@@ -206,11 +160,7 @@ class ProdutoFinder:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
 
-        # Timeout related configurations
-        chrome_options.add_argument('--disable-hang-monitor')
-        chrome_options.add_argument('--disable-site-isolation-trials')
-
-        # Memory and performance optimization
+        # Memory optimization
         chrome_options.add_argument('--memory-pressure-off')
         chrome_options.add_argument('--disk-cache-size=1')
         chrome_options.add_argument('--media-cache-size=1')
@@ -218,13 +168,6 @@ class ProdutoFinder:
         chrome_options.add_argument('--aggressive-cache-discard')
         chrome_options.add_argument('--disable-notifications')
         chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-default-apps')
-        chrome_options.add_argument('--disable-sync')
-
-        # Additional timeout settings
-        chrome_options.add_argument('--dom-automation')
-        chrome_options.add_argument('--disable-web-security')
 
         # Performance settings
         prefs = {
@@ -234,17 +177,14 @@ class ProdutoFinder:
             'profile.password_manager_enabled': False,
             'profile.default_content_settings.popups': 2,
             'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads',
-            'profile.default_content_setting_values.notifications': 2,
-            'profile.default_content_settings.cookies': 2,
-            'profile.cookie_controls_mode': 2
+            'download.default_directory': '/tmp/downloads'
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
         try:
             service = Service(
                 executable_path='/usr/local/bin/chromedriver',
-                log_path='/dev/null'
+                log_path='/dev/null'  # Disable logging
             )
 
             self.driver = webdriver.Chrome(
@@ -252,10 +192,8 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
-            # Set various timeouts
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.set_script_timeout(self.script_timeout)
-            self.driver.implicitly_wait(self.implicit_wait)
+            self.driver.implicitly_wait(10)
 
             return True
         except Exception as e:
@@ -290,27 +228,29 @@ class ProdutoFinder:
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
             products = []
 
-            if not self._load_page_with_retry(search_url):
-                logger.error("Failed to load Google Lens page")
-                return []
+            for attempt in range(self.max_retries):
+                try:
+                    self.driver.delete_all_cookies()
+                    self.driver.get(search_url)
+                    time.sleep(5)  # Reduced wait time
 
-            # Espera adicional para carregamento dinâmico
-            time.sleep(8)
+                    products = self._extract_products_selenium()
+                    if products:
+                        break
 
-            # Tenta extrair produtos várias vezes
-            for attempt in range(3):
-                products = self._extract_products_selenium()
-                if products:
-                    break
-                time.sleep(2)
+                    time.sleep(2)
+                except Exception as e:
+                    logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < self.max_retries - 1:
+                        self._initialize_driver()
 
-            return products[:5]  # Limit results
+            return products[:5]  # Limit results to reduce memory usage
 
         except Exception as e:
             logger.error(f"Product search failed: {str(e)}")
             return []
         finally:
-            self.cleanup()
+            self.cleanup()  # Ensure cleanup after each search
 
     def _extract_products_selenium(self):
         """Extrai produtos usando XPath"""
