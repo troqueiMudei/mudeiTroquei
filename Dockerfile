@@ -5,15 +5,17 @@ ENV PYTHONUNBUFFERED=1
 ENV CHROME_VERSION="133.0.6943.98-1"
 ENV CHROMEDRIVER_VERSION="133.0.6943.98"
 
-# Set up Chrome environment variables
+# Chrome environment setup
 ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
-ENV CHROMIUM_FLAGS="--headless --no-sandbox --disable-gpu --disable-software-rasterizer"
 
-# Create required directories and set permissions
-RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm && \
+# Create required directories with proper permissions
+RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm /tmp/chrome && \
     chmod 1777 /dev/shm && \
-    echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
+    chmod 777 /tmp/chrome
+
+# System configurations
+RUN echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
     echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
 
 # Install system dependencies
@@ -45,6 +47,18 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome
@@ -61,12 +75,15 @@ RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROM
     && chmod +x /usr/local/bin/chromedriver \
     && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
-# Set up chrome user
+# Set up chrome user with proper permissions
 RUN useradd -m -s /bin/bash chrome_user \
+    && mkdir -p /home/chrome_user/.config/google-chrome \
+    && chown -R chrome_user:chrome_user /home/chrome_user \
     && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
     && chown -R chrome_user:chrome_user /var/run/chrome \
     && chown -R chrome_user:chrome_user /data \
-    && chown -R chrome_user:chrome_user /dev/shm
+    && chown -R chrome_user:chrome_user /tmp/chrome \
+    && chmod -R 777 /tmp/chrome
 
 WORKDIR /app
 COPY requirements.txt .
@@ -77,10 +94,10 @@ COPY . .
 RUN chown -R chrome_user:chrome_user /app
 
 USER chrome_user
+
 RUN chmod +x start.sh
-RUN mkdir -p /tmp/chrome && chmod 777 /tmp/chrome
 
 EXPOSE 8000
-ENV GUNICORN_CMD_ARGS="--workers=2 --timeout=120 --threads=4 --worker-class=gthread"
+ENV GUNICORN_CMD_ARGS="--workers=1 --timeout=120 --threads=4 --worker-class=gthread"
 
 CMD ["./start.sh"]

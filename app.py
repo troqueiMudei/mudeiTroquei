@@ -111,27 +111,38 @@ class ProdutoFinder:
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Essential flags for running in container
+        # Base configurations
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # Additional stability flags
+        # DevTools and debugging configurations
+        chrome_options.add_argument('--remote-debugging-address=0.0.0.0')
+        chrome_options.add_argument('--remote-debugging-port=9222')
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-web-security')
+
+        # Process and memory management
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-software-rasterizer')
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-dev-tools')
-
-        # Memory and process management
         chrome_options.add_argument('--single-process')
         chrome_options.add_argument('--no-zygote')
         chrome_options.add_argument('--disable-setuid-sandbox')
-        chrome_options.add_argument('--window-size=1920,1080')
 
-        # Debugging options
-        chrome_options.add_argument('--remote-debugging-port=9222')
-        chrome_options.add_argument('--enable-logging')
-        chrome_options.add_argument('--v=1')
+        # Browser behavior
+        chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--hide-scrollbars')
+        chrome_options.add_argument('--mute-audio')
+
+        # Memory optimization
+        chrome_options.add_argument('--disable-dev-tools')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-cache')
+        chrome_options.add_argument('--disable-application-cache')
+        chrome_options.add_argument('--disable-offline-load-stale-cache')
+        chrome_options.add_argument('--disk-cache-size=0')
 
         # Content settings
         prefs = {
@@ -142,45 +153,61 @@ class ProdutoFinder:
             'profile.managed_default_content_settings.popups': 2,
             'profile.managed_default_content_settings.geolocation': 2,
             'profile.managed_default_content_settings.media_stream': 2,
+            'profile.default_content_setting_values.notifications': 2,
+            'profile.managed_default_content_settings.stylesheets': 2,
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
-        try:
-            service = Service(
-                executable_path='/usr/local/bin/chromedriver',
-                log_path='/tmp/chromedriver.log'
-            )
+        # Disable logging
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
+        for attempt in range(3):
+            try:
+                service = Service(
+                    executable_path='/usr/local/bin/chromedriver',
+                    log_path='/tmp/chromedriver.log',
+                    service_args=['--verbose']
+                )
 
-            # Set timeouts
-            self.driver.set_page_load_timeout(60)
-            self.driver.implicitly_wait(20)
-            self.wait = WebDriverWait(self.driver, 20)
+                self.driver = webdriver.Chrome(
+                    service=service,
+                    options=chrome_options
+                )
 
-            # Test connection
-            self.driver.get('about:blank')
-            logger.info("Chrome driver initialized successfully")
-            return True
+                # Set timeouts
+                self.driver.set_page_load_timeout(30)
+                self.driver.implicitly_wait(10)
+                self.wait = WebDriverWait(self.driver, 10)
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Chrome driver: {str(e)}")
-            if self.driver:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
-                self.driver = None
-            return False
+                # Test connection with a simple page
+                self.driver.get('data:text/html,<html><body><h1>Test</h1></body></html>')
+
+                if self.driver.title is not None:
+                    logger.info(f"Chrome driver initialized successfully on attempt {attempt + 1}")
+                    return True
+
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                if self.driver:
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass
+                    self.driver = None
+
+                if attempt == 2:  # Last attempt
+                    logger.error("Failed to initialize Chrome driver after all attempts")
+                    return False
+
+                time.sleep(2)  # Wait before retrying
+
+        return False
 
     def __del__(self):
         if hasattr(self, 'driver') and self.driver:
             try:
                 self.driver.quit()
-                logger.info("Chrome driver closed successfully")
             except Exception as e:
                 logger.error(f"Error closing Chrome driver: {str(e)}")
 
