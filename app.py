@@ -26,11 +26,11 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-app.config['MYSQL_HOST'] = os.getenv('MYSQLHOST', 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@mysql')
-app.config['MYSQL_USER'] = os.getenv('MYSQLUSER', 'root')
-app.config['MYSQL_PASSWORD'] = os.getenv('MYSQLPASSWORD', 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji')
-app.config['MYSQL_DB'] = os.getenv('MYSQLDATABASE', 'railway')
-app.config['MYSQL_PORT'] = int(os.getenv('MYSQLPORT', '3306'))
+app.config['MYSQL_HOST'] = 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@mysql'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji'
+app.config['MYSQL_DB'] = 'railway'
+app.config['MYSQL_PORT'] = 3306
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 
 # Adicionar logs para debug
