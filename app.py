@@ -104,24 +104,32 @@ BAIRROS = {
 # Classe para buscar produtos por imagem
 class ProdutoFinder:
     def __init__(self):
+        self.driver = None
+        self.max_retries = 3
+        self._initialize_driver()
+
+    def _initialize_driver(self):
         chrome_options = Options()
 
-        # Enhanced headless configuration
+        # Base configuration
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # Additional required flags for containerized environment
+        # Container-specific settings
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--disable-dev-tools')
+        chrome_options.add_argument('--single-process')  # Important for container environment
+        chrome_options.add_argument('--no-zygote')  # Disable zygote process
+
+        # Network and security settings
         chrome_options.add_argument('--no-first-run')
         chrome_options.add_argument('--no-default-browser-check')
-        chrome_options.add_argument('--remote-debugging-port=9222')
         chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-dev-tools')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
 
         # Memory management
-        chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-features=VizDisplayCompositor')
         chrome_options.add_argument('--disable-accelerated-2d-canvas')
         chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
@@ -130,12 +138,12 @@ class ProdutoFinder:
         chrome_options.add_argument('--disable-gpu-compositing')
         chrome_options.add_argument('--memory-pressure-off')
 
-        # Set window size and user agent
+        # Browser settings
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
-        # Disable images and other resource loading
+        # Content settings
         prefs = {
             'profile.managed_default_content_settings.images': 2,
             'profile.default_content_setting_values.notifications': 2,
@@ -149,24 +157,52 @@ class ProdutoFinder:
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
-        try:
-            service = Service(executable_path='/usr/local/bin/chromedriver')
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.set_page_load_timeout(30)
-            self.wait = WebDriverWait(self.driver, 10)
-            logger.info("Chrome driver initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Chrome driver: {str(e)}")
-            # Instead of raising, we'll set driver to None
-            self.driver = None
+        # Add logging preferences
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+        for attempt in range(self.max_retries):
+            try:
+                service = Service(
+                    executable_path='/usr/local/bin/chromedriver',
+                    log_path='/tmp/chromedriver.log'
+                )
+
+                self.driver = webdriver.Chrome(
+                    service=service,
+                    options=chrome_options
+                )
+
+                # Set timeouts
+                self.driver.set_page_load_timeout(30)
+                self.driver.implicitly_wait(10)
+                self.wait = WebDriverWait(self.driver, 10)
+
+                # Test the connection
+                self.driver.get('about:blank')
+                logger.info(f"Chrome driver initialized successfully on attempt {attempt + 1}")
+                break
+
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                if self.driver:
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass
+                    self.driver = None
+
+                if attempt == self.max_retries - 1:
+                    logger.error("Failed to initialize Chrome driver after all attempts")
+                else:
+                    time.sleep(2)  # Wait before retrying
 
     def __del__(self):
-        try:
-            if hasattr(self, 'driver') and self.driver is not None:
+        if hasattr(self, 'driver') and self.driver:
+            try:
                 self.driver.quit()
                 logger.info("Chrome driver closed successfully")
-        except Exception as e:
-            logger.error(f"Error closing Chrome driver: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error closing Chrome driver: {str(e)}")
 
     def _convert_image_to_url(self, image):
         try:
@@ -209,40 +245,47 @@ class ProdutoFinder:
             return None
 
     def buscar_produtos(self, imagem):
+        if not self.driver:
+            logger.error("Chrome driver not initialized, attempting to reinitialize")
+            self._initialize_driver()
+            if not self.driver:
+                logger.error("Failed to reinitialize Chrome driver")
+                return []
+
         try:
             img_url = self._convert_image_to_url(imagem)
             if not img_url:
                 raise Exception("Não foi possível processar a imagem")
 
-            logger.info("Iniciando busca reversa de imagem com Selenium")
+            logger.info("Iniciando busca reversa de imagem")
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
 
-            retries = 3
-            for attempt in range(retries):
+            for attempt in range(self.max_retries):
                 try:
-                    logger.info(f"Tentativa {attempt + 1} de acessar URL: {search_url}")
                     self.driver.get(search_url)
-                    time.sleep(10)  # Aumentado para dar mais tempo para a página carregar
+                    time.sleep(5)  # Reduced wait time
 
                     products = self._extract_products_selenium()
                     if products:
                         return products
 
-                    if attempt < retries - 1:
+                    if attempt < self.max_retries - 1:
+                        logger.warning(f"No products found on attempt {attempt + 1}, retrying...")
                         time.sleep(2)
                         continue
 
                 except Exception as e:
-                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
-                    if attempt < retries - 1:
+                    logger.error(f"Error on attempt {attempt + 1}: {str(e)}")
+                    if attempt < self.max_retries - 1:
+                        self._initialize_driver()  # Reinitialize driver on error
                         time.sleep(2)
                         continue
 
-            logger.warning("Nenhum produto encontrado após todas as tentativas")
+            logger.warning("No products found after all attempts")
             return []
 
         except Exception as e:
-            logger.error(f"Erro na busca de produtos: {str(e)}")
+            logger.error(f"Error in product search: {str(e)}")
             return []
 
     def _extract_products_selenium(self):
