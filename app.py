@@ -26,12 +26,11 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-app.config['MYSQL_HOST'] = 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@viaduct.proxy.rlwy.net:24171/railway'
+app.config['MYSQL_HOST'] = 'viaduct.proxy.rlwy.net'  # Apenas o hostname
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji'
 app.config['MYSQL_DB'] = 'railway'
-app.config['MYSQL_PORT'] = 3306
-app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+app.config['MYSQL_PORT'] = 24171  # Porta externa
 
 # Adicionar logs para debug
 logger.info(f"MySQL Host: {app.config['MYSQL_HOST']}")

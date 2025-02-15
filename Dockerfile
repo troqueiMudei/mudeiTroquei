@@ -52,5 +52,9 @@ RUN chmod +x start.sh
 
 EXPOSE 8000
 
+# Adicionar após o EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
 # Usar script de inicialização
 CMD ["./start.sh"]
