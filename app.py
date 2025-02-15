@@ -26,7 +26,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
 
 # Configuração do MySQL
-app.config['MYSQL_HOST'] = 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@mysql'
+app.config['MYSQL_HOST'] = 'mysql://root:SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji@viaduct.proxy.rlwy.net:24171/railway'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji'
 app.config['MYSQL_DB'] = 'railway'
