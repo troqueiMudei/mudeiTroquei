@@ -112,15 +112,19 @@ class ProdutoFinder:
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-browser-side-navigation')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        chrome_options.add_argument('--disable-software-rasterizer')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument(
-            'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
         try:
-            # Usar o ChromeDriver instalado diretamente
             service = Service('/usr/local/bin/chromedriver')
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.driver.set_page_load_timeout(30)
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             self.wait = WebDriverWait(self.driver, 10)
             logger.info("Driver do Chrome inicializado com sucesso")
@@ -145,21 +149,32 @@ class ProdutoFinder:
             image.save(img_buffer, format='JPEG', quality=95)
             img_buffer.seek(0)
 
-            files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                    response = requests.post(
+                        'https://api.imgbb.com/1/upload',
+                        params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                        files=files,
+                        timeout=30
+                    )
 
-            response = requests.post(
-                'https://api.imgbb.com/1/upload',
-                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
-                files=files
-            )
-
-            if response.status_code == 200:
-                url = response.json()['data']['url']
-                logger.info(f"Imagem convertida para URL: {url}")
-                return url
-            else:
-                logger.error(f"Erro no upload da imagem: {response.status_code}")
-                return None
+                    if response.status_code == 200:
+                        url = response.json()['data']['url']
+                        logger.info(f"Imagem convertida para URL: {url}")
+                        return url
+                    else:
+                        logger.error(f"Erro no upload da imagem: {response.status_code}")
+                        if attempt < retries - 1:
+                            time.sleep(2)
+                            continue
+                except Exception as e:
+                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+                        continue
+            return None
 
         except Exception as e:
             logger.error(f"Erro ao converter imagem: {str(e)}")
@@ -172,33 +187,31 @@ class ProdutoFinder:
                 raise Exception("Não foi possível processar a imagem")
 
             logger.info("Iniciando busca reversa de imagem com Selenium")
-
-            # URL de busca por imagem do Google Lens
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
 
-            logger.info(f"Acessando URL: {search_url}")
-            self.driver.get(search_url)
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    logger.info(f"Tentativa {attempt + 1} de acessar URL: {search_url}")
+                    self.driver.get(search_url)
+                    time.sleep(10)  # Aumentado para dar mais tempo para a página carregar
 
-            # Aguarda mais tempo para a página carregar
-            time.sleep(7)
+                    products = self._extract_products_selenium()
+                    if products:
+                        return products
 
-            # Salva screenshot para debug
-            self.driver.save_screenshot('debug_page.png')
-            logger.info("Screenshot salvo como debug_page.png")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+                        continue
 
-            # Salva HTML para debug
-            with open('page_source.html', 'w', encoding='utf-8') as f:
-                f.write(self.driver.page_source)
-            logger.info("HTML salvo como page_source.html")
+                except Exception as e:
+                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+                        continue
 
-            # Tenta encontrar resultados
-            products = self._extract_products_selenium()
-
-            if not products:
-                logger.warning("Nenhum produto encontrado")
-                return []
-
-            return products
+            logger.warning("Nenhum produto encontrado após todas as tentativas")
+            return []
 
         except Exception as e:
             logger.error(f"Erro na busca de produtos: {str(e)}")
