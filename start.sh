@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Iniciar Xvfb
+Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+
 # Function to test MySQL connection
 test_mysql_connection() {
     mysqladmin ping -h"viaduct.proxy.rlwy.net" -P"24171" -u"root" -p"SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji" --silent

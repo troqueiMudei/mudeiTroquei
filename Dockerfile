@@ -5,6 +5,11 @@ ENV PYTHONUNBUFFERED=1
 ENV CHROME_VERSION="133.0.6943.98-1"
 ENV CHROMEDRIVER_VERSION="133.0.6943.98"
 
+ENV PYTHONPATH=/app
+ENV DISPLAY=:99
+ENV CHROME_PATH=/usr/bin/google-chrome
+ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
+
 # Chrome environment setup
 ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
@@ -67,6 +72,14 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Adicionar estas linhas após a instalação do Chrome
+RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
+    && echo '{"download_prompt_for_download": false, "download.default_directory": "/tmp/downloads"}' > /home/chrome_user/.config/google-chrome/Default/Preferences \
+    && chown -R chrome_user:chrome_user /home/chrome_user/.config
+
+# Modificar as permissões do chromedriver
+RUN chmod 755 /usr/local/bin/chromedriver
 
 # Install ChromeDriver
 RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
