@@ -107,308 +107,107 @@ class ProdutoFinder:
         self.driver = None
         self.max_retries = 3
         self.page_load_timeout = 40
-        self._initialize_driver()
 
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Configurações essenciais para Docker
+        # Essential configurations
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-
-        # Configurações para melhorar a estabilidade
         chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--ignore-certificate-errors')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--disable-infobars')
 
-        # Configurações de proxy (adicione se necessário)
-        chrome_options.add_argument('--proxy-server="direct://"')
-        chrome_options.add_argument('--proxy-bypass-list=*')
+        # Memory optimization
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disk-cache-size=1')
+        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--disable-application-cache')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-logging')
 
-        # Configurações de performance
+        # Performance settings
         prefs = {
             'profile.managed_default_content_settings.images': 2,
             'profile.default_content_settings.images': 2,
-            'disk-cache-size': 4096,
+            'disk-cache-size': 1,
             'profile.password_manager_enabled': False,
             'profile.default_content_settings.popups': 2,
             'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads',
-            'javascript.enabled': True
+            'download.default_directory': '/tmp/downloads'
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
-        for attempt in range(3):
-            try:
-                service = Service(
-                    executable_path='/usr/local/bin/chromedriver',
-                    log_path='/tmp/chromedriver.log'
-                )
+        try:
+            service = Service(
+                executable_path='/usr/local/bin/chromedriver',
+                log_path='/dev/null'  # Disable logging
+            )
 
-                self.driver = webdriver.Chrome(
-                    service=service,
-                    options=chrome_options
-                )
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
 
-                # Configurar timeouts mais longos
-                self.driver.set_page_load_timeout(self.page_load_timeout)
-                self.driver.implicitly_wait(20)
+            self.driver.set_page_load_timeout(self.page_load_timeout)
+            self.driver.implicitly_wait(10)
 
-                # Testar a conexão com retry
-                max_test_attempts = 3
-                for test_attempt in range(max_test_attempts):
-                    try:
-                        self.driver.get('about:blank')
-                        return True
-                    except Exception as e:
-                        if test_attempt == max_test_attempts - 1:
-                            raise
-                        time.sleep(2)
-                        continue
-
-            except Exception as e:
-                logger.error(f"Tentativa {attempt + 1} de inicialização falhou: {str(e)}")
-                if self.driver:
-                    try:
-                        self.driver.quit()
-                    except:
-                        pass
-                    self.driver = None
-
-                if attempt == 2:
-                    logger.error("Falha ao inicializar Chrome driver após todas as tentativas")
-                    return False
-
-                time.sleep(3)  # Aumentado o tempo de espera entre tentativas
-
-        return False
+            return True
+        except Exception as e:
+            logger.error(f"Driver initialization failed: {str(e)}")
+            if self.driver:
+                self.driver.quit()
+            return False
 
     def __del__(self):
+        self.cleanup()
+
+    def cleanup(self):
+        """Explicit cleanup method"""
         if hasattr(self, 'driver') and self.driver:
             try:
+                self.driver.delete_all_cookies()
                 self.driver.quit()
             except Exception as e:
-                logger.error(f"Error closing Chrome driver: {str(e)}")
-
-    def _convert_image_to_url(self, image):
-        try:
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-
-            img_buffer = io.BytesIO()
-            image.save(img_buffer, format='JPEG', quality=95)
-            img_buffer.seek(0)
-
-            retries = 3
-            for attempt in range(retries):
-                try:
-                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
-                    response = requests.post(
-                        'https://api.imgbb.com/1/upload',
-                        params={'key': '8234882d2cc5bc9c7f2f239283951076'},
-                        files=files,
-                        timeout=30
-                    )
-
-                    if response.status_code == 200:
-                        url = response.json()['data']['url']
-                        logger.info(f"Imagem convertida para URL: {url}")
-                        return url
-                    else:
-                        logger.error(f"Erro no upload da imagem: {response.status_code}")
-                        if attempt < retries - 1:
-                            time.sleep(2)
-                            continue
-                except Exception as e:
-                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                    if attempt < retries - 1:
-                        time.sleep(2)
-                        continue
-            return None
-
-        except Exception as e:
-            logger.error(f"Erro ao converter imagem: {str(e)}")
-            return None
+                logger.error(f"Error in cleanup: {str(e)}")
+            finally:
+                self.driver = None
 
     def buscar_produtos(self, imagem):
-        if not self.driver:
-            logger.error("Chrome driver não inicializado, tentando reinicializar")
-            self._initialize_driver()
-            if not self.driver:
-                logger.error("Falha ao reinicializar Chrome driver")
+        try:
+            if not self.driver and not self._initialize_driver():
                 return []
 
-        try:
             img_url = self._convert_image_to_url(imagem)
             if not img_url:
-                raise Exception("Não foi possível processar a imagem")
+                return []
 
-            logger.info("Iniciando busca reversa de imagem")
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
+            products = []
 
             for attempt in range(self.max_retries):
                 try:
-                    # Limpar cookies e cache antes de cada tentativa
                     self.driver.delete_all_cookies()
-
-                    # Tentar carregar a página com retry
-                    load_attempts = 3
-                    for load_attempt in range(load_attempts):
-                        try:
-                            self.driver.get(search_url)
-                            break
-                        except Exception as e:
-                            if load_attempt == load_attempts - 1:
-                                raise
-                            time.sleep(2)
-                            continue
-
-                    # Esperar mais tempo para a página carregar
-                    time.sleep(8)
+                    self.driver.get(search_url)
+                    time.sleep(5)  # Reduced wait time
 
                     products = self._extract_products_selenium()
                     if products:
-                        return products
+                        break
 
-                    if attempt < self.max_retries - 1:
-                        logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}, tentando novamente...")
-                        time.sleep(3)
-                        continue
-
+                    time.sleep(2)
                 except Exception as e:
-                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
+                    logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
                     if attempt < self.max_retries - 1:
                         self._initialize_driver()
-                        time.sleep(3)
-                        continue
 
-            logger.warning("Nenhum produto encontrado após todas as tentativas")
-            return []
+            return products[:5]  # Limit results to reduce memory usage
 
         except Exception as e:
-            logger.error(f"Erro na busca de produtos: {str(e)}")
+            logger.error(f"Product search failed: {str(e)}")
             return []
-
         finally:
-            try:
-                if self.driver:
-                    self.driver.delete_all_cookies()
-            except:
-                pass
-
-    def _extract_products_selenium(self):
-        """Extrai produtos usando XPath"""
-        products = []
-        try:
-            # Lista de XPaths para tentar encontrar resultados
-            xpaths = [
-                "//div[contains(@class, 'isv-r')]",  # Resultados do Google Lens
-                "//div[@class='g' or contains(@class, 'g-card')]",  # Resultados normais do Google
-                "//div[.//h3 or .//a[@href]]",  # Qualquer div que contenha um título ou link
-                "//div[contains(@style, 'background-image')]",  # Divs com imagens de fundo
-                "//a[.//img]"  # Links que contêm imagens
-            ]
-
-            result_elements = []
-            for xpath in xpaths:
-                try:
-                    logger.info(f"Tentando XPath: {xpath}")
-                    elements = self.driver.find_elements(By.XPATH, xpath)
-                    if elements:
-                        logger.info(f"Encontrados {len(elements)} elementos com XPath {xpath}")
-                        result_elements.extend(elements)
-                        break
-                except Exception as e:
-                    logger.warning(f"XPath {xpath} falhou: {str(e)}")
-                    continue
-
-            # Remove elementos duplicados
-            result_elements = list(set(result_elements))
-
-            for element in result_elements[:10]:
-                try:
-                    # Tenta diferentes XPaths para título
-                    title = None
-                    title_xpaths = [
-                        ".//h3",
-                        ".//div[contains(@class, 'title')]",
-                        ".//a",
-                        ".//span[string-length(text()) > 10]"
-                    ]
-
-                    for xpath in title_xpaths:
-                        try:
-                            title_element = element.find_element(By.XPATH, xpath)
-                            title = title_element.text.strip()
-                            if title:
-                                break
-                        except:
-                            continue
-
-                    if not title:
-                        continue
-
-                    # Tenta encontrar link
-                    link = None
-                    try:
-                        link_element = element.find_element(By.XPATH, ".//a")
-                        link = link_element.get_attribute('href')
-                    except:
-                        try:
-                            # Tenta encontrar o link no próprio elemento
-                            link = element.get_attribute('href')
-                        except:
-                            continue
-
-                    # Tenta encontrar preço
-                    price = None
-                    try:
-                        # Procura por texto que pareça preço
-                        price_text = element.text
-                        price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
-                        if price_matches:
-                            price_str = price_matches[0]
-                            price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
-                    except:
-                        pass
-
-                    # Tenta encontrar imagem
-                    img = None
-                    try:
-                        img_element = element.find_element(By.XPATH, ".//img")
-                        img = img_element.get_attribute('src')
-                    except:
-                        try:
-                            # Tenta encontrar imagem de fundo
-                            style = element.get_attribute('style')
-                            if style and 'background-image' in style:
-                                img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
-                        except:
-                            pass
-
-                    if title and link:  # Requisitos mínimos
-                        product = {
-                            "nome": title,
-                            "preco": price,
-                            "link": link,
-                            "imagem": img
-                        }
-                        products.append(product)
-                        logger.info(f"Produto extraído: {title}")
-
-                except Exception as e:
-                    logger.error(f"Erro ao extrair produto individual: {str(e)}")
-                    continue
-
-            return products
-
-        except Exception as e:
-            logger.error(f"Erro ao extrair produtos: {str(e)}")
-            return []
+            self.cleanup()  # Ensure cleanup after each search
 
 
 # Decorator para verificar se o usuário está logado

@@ -26,8 +26,12 @@ echo "MySQL is available"
 
 # Start application with gunicorn
 exec gunicorn --bind 0.0.0.0:8000 \
-    --workers 4 \
-    --timeout 120 \
+    --workers 2 \
+    --timeout 300 \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
+    --worker-class gthread \
+    --threads 4 \
     --access-logfile - \
     --error-logfile - \
     app:app
