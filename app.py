@@ -479,17 +479,20 @@ def lista_cadastros():
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    cur = mysql.connection.cursor()
+    cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
     ficha = cur.fetchone()
     cur.close()
+
+    if not ficha:
+        return "Ficha não encontrada", 404
 
     # Decodifica os links e fotos dos produtos
     ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
     ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
 
     # Cálculo do valor estimado
-    valor_estimado = float(ficha['valor'])
+    valor_estimado = float(ficha['valor']) if ficha['valor'] is not None else 0.0
 
     if ficha['desmontagem'] == 'Sim':
         valor_estimado -= 50.00
@@ -507,11 +510,11 @@ def detalhes_ficha(id):
     ficha['demandaAlta'] = demanda_alta
 
     # Converter o número do bairro para o nome do bairro
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']), "Bairro não encontrado")
+    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']) if ficha['bairro'] else 0, "Bairro não encontrado")
 
     # Converter a data para o formato brasileiro (DD/MM/AAAA)
     if ficha['dtCompra']:
-        data_compra = datetime.strptime(ficha['dtCompra'], '%Y-%m-%d')
+        data_compra = datetime.strptime(str(ficha['dtCompra']), '%Y-%m-%d')
         ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
     else:
         ficha['dtCompra_br'] = "Data não informada"
