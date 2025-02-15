@@ -39,7 +39,7 @@
 
                 <h2 class="text-xl font-semibold mb-2">{{ ficha.nome }}</h2>
                 <p class="text-gray-600">{{ ficha.produto }}</p>
-                <p class="text-lg font-bold text-green-600">R$ {{ "%.2f"|format(ficha.valor) }}</p>
+                <p class="text-lg font-bold text-green-600">R$ {{ "%.2f"|format(ficha.valor|float if ficha.valor is not none else 0) }}</p>
                 <p class="text-sm text-gray-500">Status: {{ ficha.status }}</p>
                 <a href="{{ url_for('detalhes_ficha', id=ficha.id) }}" class="inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors">
                     Ver Detalhes
