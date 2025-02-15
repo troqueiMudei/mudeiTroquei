@@ -111,45 +111,33 @@ class ProdutoFinder:
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Base configuration
+        # Essential flags for running in container
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # Container-specific settings
+        # Additional stability flags
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--single-process')  # Important for container environment
-        chrome_options.add_argument('--no-zygote')  # Disable zygote process
-
-        # Network and security settings
-        chrome_options.add_argument('--no-first-run')
-        chrome_options.add_argument('--no-default-browser-check')
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-dev-tools')
-        chrome_options.add_argument('--disable-ipc-flooding-protection')
 
-        # Memory management
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        chrome_options.add_argument('--disable-accelerated-2d-canvas')
-        chrome_options.add_argument('--disable-accelerated-jpeg-decoding')
-        chrome_options.add_argument('--disable-accelerated-mjpeg-decode')
-        chrome_options.add_argument('--disable-accelerated-video-decode')
-        chrome_options.add_argument('--disable-gpu-compositing')
-        chrome_options.add_argument('--memory-pressure-off')
-
-        # Browser settings
+        # Memory and process management
+        chrome_options.add_argument('--single-process')
+        chrome_options.add_argument('--no-zygote')
+        chrome_options.add_argument('--disable-setuid-sandbox')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
+
+        # Debugging options
+        chrome_options.add_argument('--remote-debugging-port=9222')
+        chrome_options.add_argument('--enable-logging')
+        chrome_options.add_argument('--v=1')
 
         # Content settings
         prefs = {
             'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_setting_values.notifications': 2,
-            'profile.managed_default_content_settings.stylesheets': 2,
-            'profile.managed_default_content_settings.cookies': 2,
             'profile.managed_default_content_settings.javascript': 1,
+            'profile.managed_default_content_settings.cookies': 2,
             'profile.managed_default_content_settings.plugins': 3,
             'profile.managed_default_content_settings.popups': 2,
             'profile.managed_default_content_settings.geolocation': 2,
@@ -157,44 +145,36 @@ class ProdutoFinder:
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
-        # Add logging preferences
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        try:
+            service = Service(
+                executable_path='/usr/local/bin/chromedriver',
+                log_path='/tmp/chromedriver.log'
+            )
 
-        for attempt in range(self.max_retries):
-            try:
-                service = Service(
-                    executable_path='/usr/local/bin/chromedriver',
-                    log_path='/tmp/chromedriver.log'
-                )
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
 
-                self.driver = webdriver.Chrome(
-                    service=service,
-                    options=chrome_options
-                )
+            # Set timeouts
+            self.driver.set_page_load_timeout(60)
+            self.driver.implicitly_wait(20)
+            self.wait = WebDriverWait(self.driver, 20)
 
-                # Set timeouts
-                self.driver.set_page_load_timeout(30)
-                self.driver.implicitly_wait(10)
-                self.wait = WebDriverWait(self.driver, 10)
+            # Test connection
+            self.driver.get('about:blank')
+            logger.info("Chrome driver initialized successfully")
+            return True
 
-                # Test the connection
-                self.driver.get('about:blank')
-                logger.info(f"Chrome driver initialized successfully on attempt {attempt + 1}")
-                break
-
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                if self.driver:
-                    try:
-                        self.driver.quit()
-                    except:
-                        pass
-                    self.driver = None
-
-                if attempt == self.max_retries - 1:
-                    logger.error("Failed to initialize Chrome driver after all attempts")
-                else:
-                    time.sleep(2)  # Wait before retrying
+        except Exception as e:
+            logger.error(f"Failed to initialize Chrome driver: {str(e)}")
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+            return False
 
     def __del__(self):
         if hasattr(self, 'driver') and self.driver:

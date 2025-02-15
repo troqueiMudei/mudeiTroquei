@@ -1,6 +1,5 @@
 FROM python:3.10-slim
 
-# Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV CHROME_VERSION="133.0.6943.98-1"
@@ -11,8 +10,9 @@ ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
 ENV CHROMIUM_FLAGS="--headless --no-sandbox --disable-gpu --disable-software-rasterizer"
 
-# Create required directories
-RUN mkdir -p /etc/sysctl.d /var/run/chrome /data && \
+# Create required directories and set permissions
+RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm && \
+    chmod 1777 /dev/shm && \
     echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
     echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
 
@@ -37,19 +37,7 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     libgbm1 \
     libasound2 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxi6 \
-    libxrandr2 \
-    libxrender1 \
-    libxtst6 \
-    libfreetype6 \
+    fonts-liberation \
     xdg-utils \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -73,37 +61,26 @@ RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROM
     && chmod +x /usr/local/bin/chromedriver \
     && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
-# Set up chrome user with proper permissions
+# Set up chrome user
 RUN useradd -m -s /bin/bash chrome_user \
     && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
     && chown -R chrome_user:chrome_user /var/run/chrome \
-    && chown -R chrome_user:chrome_user /data
+    && chown -R chrome_user:chrome_user /data \
+    && chown -R chrome_user:chrome_user /dev/shm
 
-# Set up working directory
 WORKDIR /app
-
-# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY . .
 RUN chown -R chrome_user:chrome_user /app
 
-# Switch to chrome user
 USER chrome_user
-
-# Make start script executable
 RUN chmod +x start.sh
-
-# Create directory for Chrome temporary files
 RUN mkdir -p /tmp/chrome && chmod 777 /tmp/chrome
 
 EXPOSE 8000
-
-# Configure Gunicorn
 ENV GUNICORN_CMD_ARGS="--workers=2 --timeout=120 --threads=4 --worker-class=gthread"
 
-# Start application
 CMD ["./start.sh"]
