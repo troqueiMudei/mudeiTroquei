@@ -4,6 +4,7 @@ FROM python:3.10-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV TZ=America/Sao_Paulo
+ENV CHROMEDRIVER_VERSION=121.0.6167.85
 
 # Configurações do Chrome
 ENV CHROME_BIN=/usr/bin/google-chrome
@@ -78,12 +79,11 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
     apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Descobrir e instalar a versão correspondente do ChromeDriver
-RUN CHROME_VERSION=$(google-chrome --version | grep -oP "Chrome \K([0-9]+)") && \
-    CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") && \
-    wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip && \
-    unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
-    rm /tmp/chromedriver.zip && \
+# Instalar ChromeDriver com versão fixa
+RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip && \
+    unzip /tmp/chromedriver.zip -d /tmp/ && \
+    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    rm -rf /tmp/chromedriver.zip /tmp/chromedriver-linux64 && \
     chmod 755 /usr/local/bin/chromedriver
 
 # Configurar diretórios e preferências do Chrome
