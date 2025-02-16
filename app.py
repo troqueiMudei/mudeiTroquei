@@ -109,6 +109,8 @@ class ProdutoFinder:
         self.driver = None
         self.max_retries = 3
         self.page_load_timeout = 90
+        self.implicit_wait = 30
+        self.explicit_wait = 10
 
     def _initialize_driver(self):
         chrome_options = Options()
@@ -119,17 +121,23 @@ class ProdutoFinder:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--window-size=1920,1080')
 
-        # Configurações para evitar problemas com localStorage
-        chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--allow-running-insecure-content')
-        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+        # Configurações adicionais para estabilidade
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('--disable-browser-side-navigation')
+
+        # Configurações de memória
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--js-flags="--max-old-space-size=1024"')
 
         # User agent mais realista
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
-
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
 
         try:
             service = Service(
@@ -143,7 +151,7 @@ class ProdutoFinder:
             )
 
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(30)
+            self.driver.implicitly_wait(self.implicit_wait)
 
             return True
         except Exception as e:
@@ -151,6 +159,18 @@ class ProdutoFinder:
             if self.driver:
                 self.driver.quit()
             return False
+
+    def _safe_find_elements(self, selector, timeout=10):
+        """Método seguro para encontrar elementos com retry"""
+        try:
+            wait = WebDriverWait(self.driver, timeout)
+            elements = wait.until(
+                EC.presence_of_all_elements_located((By.XPATH, selector))
+            )
+            return elements
+        except Exception as e:
+            logger.error(f"Erro ao buscar elementos com selector {selector}: {str(e)}")
+            return []
 
     def _wait_for_page_load(self):
         """Espera a página carregar completamente"""
@@ -231,22 +251,28 @@ class ProdutoFinder:
 
     def buscar_produtos(self, imagem):
         try:
-            if not self.driver and not self._initialize_driver():
-                return []
-
-            img_url = self._convert_image_to_url(imagem)
-            if not img_url:
-                return []
-
-            search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-
             for attempt in range(self.max_retries):
                 try:
-                    logger.info(f"Tentativa {attempt + 1} de buscar produtos")
+                    if not self.driver and not self._initialize_driver():
+                        continue
+
+                    img_url = self._convert_image_to_url(imagem)
+                    if not img_url:
+                        return []
+
+                    search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
+
+                    # Limpar cookies e cache antes de cada tentativa
                     self.driver.delete_all_cookies()
+                    self.driver.execute_script("window.localStorage.clear();")
+                    self.driver.execute_script("window.sessionStorage.clear();")
+
                     self.driver.get(search_url)
 
-                    # Usar o método extract_products_selenium
+                    # Verificar se a página carregou corretamente
+                    if not self._wait_for_page_load():
+                        raise Exception("Página não carregou completamente")
+
                     products = self._extract_products_selenium()
 
                     if products:
@@ -256,6 +282,7 @@ class ProdutoFinder:
                     logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
                     if attempt < self.max_retries - 1:
                         time.sleep(10)
+                        self.cleanup()
                         self._initialize_driver()
 
             return []
@@ -268,10 +295,11 @@ class ProdutoFinder:
 
     def _extract_products_selenium(self):
         products = []
+        wait_time = 15
+
         try:
-            # Esperar página carregar completamente
-            time.sleep(15)
-            wait = WebDriverWait(self.driver, 10)
+            # Esperar página carregar
+            time.sleep(wait_time)
 
             selectors = [
                 "//div[contains(@class, 'UAiK1e')]",
@@ -282,13 +310,15 @@ class ProdutoFinder:
             ]
 
             for selector in selectors:
-                try:
-                    elements = wait.until(
-                        EC.presence_of_all_elements_located((By.XPATH, selector))
-                    )
+                elements = self._safe_find_elements(selector)
 
+                if elements:
                     for element in elements:
                         try:
+                            # Rolar até o elemento
+                            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                            time.sleep(0.5)  # Pequena pausa após scroll
+
                             title = element.text.strip()
                             link = element.get_attribute('href') or ''
 
@@ -306,11 +336,7 @@ class ProdutoFinder:
                     if products:
                         break
 
-                except Exception as e:
-                    logger.error(f"Erro com selector {selector}: {str(e)}")
-                    continue
-
-            return products[:5]
+            return products[:5]  # Retorna apenas os 5 primeiros produtos
 
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")

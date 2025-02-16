@@ -1,31 +1,33 @@
 FROM python:3.10-slim
 
+# Configuração de variáveis de ambiente
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV CHROME_VERSION="133.0.6943.98-1"
-ENV CHROMEDRIVER_VERSION="133.0.6943.98"
+ENV CHROME_VERSION="114.0.5735.90-1"
+ENV CHROMEDRIVER_VERSION="114.0.5735.90"
+ENV TZ=America/Sao_Paulo
 
-# Chrome environment setup
+# Configurações do Chrome
 ENV CHROME_BIN=/usr/bin/google-chrome
 ENV CHROME_PATH=/usr/lib/google-chrome
 ENV PYTHONPATH=/app
 ENV DISPLAY=:99
 ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
-ENV CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer"
-ENV TZ=America/Sao_Paulo
+ENV CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer --disable-features=VizDisplayCompositor --memory-pressure-off"
 
+# Configurar timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Create required directories with proper permissions
+# Criar diretórios necessários com permissões adequadas
 RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm /tmp/chrome && \
     chmod 1777 /dev/shm && \
     chmod 777 /tmp/chrome
 
-# System configurations
+# Configurações do sistema
 RUN echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
     echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
 
-# Install system dependencies
+# Instalar dependências do sistema
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg2 \
@@ -68,26 +70,25 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create chrome user first
+# Criar usuário chrome
 RUN useradd -m -s /bin/bash chrome_user
 
-# Install Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable=${CHROME_VERSION} \
-    && rm -rf /var/lib/apt/lists/*
+# Instalar Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
+    apt-get install -y google-chrome-stable=${CHROME_VERSION} && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver
-RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
-    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
-    && mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod 755 /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
+# Instalar ChromeDriver
+RUN wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip && \
+    unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
+    rm /tmp/chromedriver.zip && \
+    chmod 755 /usr/local/bin/chromedriver
 
-# Now set up Chrome user directories and permissions
-RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
-    && echo '{ \
+# Configurar diretórios e preferências do Chrome
+RUN mkdir -p /home/chrome_user/.config/google-chrome/Default && \
+    echo '{ \
         "download_prompt_for_download": false, \
         "download.default_directory": "/tmp/downloads", \
         "browser": { \
@@ -99,29 +100,42 @@ RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
         } \
     }' > /home/chrome_user/.config/google-chrome/Default/Preferences
 
-# Set all permissions after everything is installed
-RUN chmod -R 755 /usr/local/bin/chromedriver \
-    && chown -R chrome_user:chrome_user /home/chrome_user \
-    && chown -R chrome_user:chrome_user /home/chrome_user/.config \
-    && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
-    && chown -R chrome_user:chrome_user /var/run/chrome \
-    && chown -R chrome_user:chrome_user /data \
-    && chown -R chrome_user:chrome_user /tmp/chrome \
-    && chmod -R 777 /tmp/chrome
+# Configurar permissões
+RUN chown -R chrome_user:chrome_user /home/chrome_user && \
+    chown -R chrome_user:chrome_user /home/chrome_user/.config && \
+    chown -R chrome_user:chrome_user /usr/local/bin/chromedriver && \
+    chown -R chrome_user:chrome_user /var/run/chrome && \
+    chown -R chrome_user:chrome_user /data && \
+    chown -R chrome_user:chrome_user /tmp/chrome && \
+    chmod -R 777 /tmp/chrome
 
+# Configurar ambiente virtual Python
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Configurar diretório de trabalho
 WORKDIR /app
+
+# Instalar dependências Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copiar aplicação
 COPY . .
 RUN chown -R chrome_user:chrome_user /app
 
+# Mudar para usuário não-root
 USER chrome_user
 
+# Tornar script de inicialização executável
 RUN chmod +x start.sh
 
+# Expor porta
 EXPOSE 8000
+
+# Configurar Gunicorn
 ENV GUNICORN_CMD_ARGS="--workers=1 --timeout=120 --threads=4 --worker-class=gthread"
 
+# Comando de inicialização
 CMD ["./start.sh"]
