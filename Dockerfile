@@ -68,6 +68,9 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create chrome user first
+RUN useradd -m -s /bin/bash chrome_user
+
 # Install Chrome
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
@@ -75,11 +78,14 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
     && apt-get install -y google-chrome-stable=${CHROME_VERSION} \
     && rm -rf /var/lib/apt/lists/*
 
-# Garantir que as permissões estejam corretas
-RUN chmod -R 755 /usr/local/bin/chromedriver \
-    && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver
+# Install ChromeDriver
+RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
+    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
+    && mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
+    && chmod 755 /usr/local/bin/chromedriver \
+    && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
 
-# Adicionar configurações específicas do Chrome
+# Now set up Chrome user directories and permissions
 RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
     && echo '{ \
         "download_prompt_for_download": false, \
@@ -93,17 +99,8 @@ RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
         } \
     }' > /home/chrome_user/.config/google-chrome/Default/Preferences
 
-# Install ChromeDriver
-RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
-    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
-    && mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod 755 /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
-
-# Create chrome user and set up directories
-RUN useradd -m -s /bin/bash chrome_user \
-    && mkdir -p /home/chrome_user/.config/google-chrome/Default \
-    && echo '{"download_prompt_for_download": false, "download.default_directory": "/tmp/downloads"}' > /home/chrome_user/.config/google-chrome/Default/Preferences \
+# Set all permissions after everything is installed
+RUN chmod -R 755 /usr/local/bin/chromedriver \
     && chown -R chrome_user:chrome_user /home/chrome_user \
     && chown -R chrome_user:chrome_user /home/chrome_user/.config \
     && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
