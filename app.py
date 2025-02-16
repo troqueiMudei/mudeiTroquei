@@ -116,24 +116,20 @@ class ProdutoFinder:
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
 
-        # User agent realista
+        # Configurações adicionais para evitar detecção
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--allow-running-insecure-content')
+        chrome_options.add_argument('--lang=pt-BR,pt')
+
+        # User agent mais realista
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
-        # Configurações anti-detecção
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-
-        # Desabilitar imagens para melhor performance
-        prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2
-        }
-        chrome_options.add_experimental_option('prefs', prefs)
 
         try:
             service = Service(
@@ -146,14 +142,36 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
+            # Configurar timeouts
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(20)
+            self.driver.implicitly_wait(30)  # Aumentado para 30 segundos
 
             return True
         except Exception as e:
             logger.error(f"Driver initialization failed: {str(e)}")
             if self.driver:
                 self.driver.quit()
+            return False
+
+    def _wait_for_page_load(self):
+        """Espera a página carregar completamente"""
+        try:
+            # Espera inicial
+            time.sleep(20)
+
+            # Espera o estado 'complete' do documento
+            self.driver.execute_script("return document.readyState") == "complete"
+
+            # Verifica se há elementos básicos na página
+            basic_selectors = ['div', 'a', 'img']
+            for selector in basic_selectors:
+                elements = self.driver.find_elements(By.TAG_NAME, selector)
+                if elements:
+                    return True
+
+            return False
+        except Exception as e:
+            logger.error(f"Erro ao esperar carregamento da página: {str(e)}")
             return False
 
     def _convert_image_to_url(self, image):
@@ -227,80 +245,74 @@ class ProdutoFinder:
             for attempt in range(self.max_retries):
                 try:
                     logger.info(f"Tentativa {attempt + 1} de buscar produtos")
+
+                    # Limpar cookies e cache
                     self.driver.delete_all_cookies()
+                    self.driver.execute_script("window.localStorage.clear();")
+                    self.driver.execute_script("window.sessionStorage.clear();")
+
+                    # Navegar para a URL
                     self.driver.get(search_url)
 
-                    # Espera inicial
-                    time.sleep(15)
+                    # Esperar a página carregar
+                    if not self._wait_for_page_load():
+                        logger.error("Página não carregou completamente")
+                        continue
 
-                    # Lista de seletores CSS mais simples
-                    selectors = [
-                        "div.UAiK1e",
-                        "div.IZE3Td",
-                        "div.RJuLyc",
-                        "div.kqKHvb",
-                        "a.VZqTOd"
+                    # Capturar screenshot para debug
+                    self.driver.save_screenshot(f"/tmp/debug_screenshot_{attempt}.png")
+
+                    # Logar HTML para debug
+                    logger.debug(f"HTML da página: {self.driver.page_source[:1000]}")
+
+                    # Tentar diferentes estratégias de busca
+                    search_strategies = [
+                        # Estratégia 1: Elementos genéricos com links
+                        lambda: self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="google"]'),
+
+                        # Estratégia 2: Divs com imagens
+                        lambda: self.driver.find_elements(By.CSS_SELECTOR, 'div:has(img)'),
+
+                        # Estratégia 3: Elementos clicáveis
+                        lambda: self.driver.find_elements(By.CSS_SELECTOR, '[role="button"], [tabindex="0"]'),
+
+                        # Estratégia 4: Elementos com texto
+                        lambda: self.driver.find_elements(By.XPATH, '//*[string-length(text()) > 20]')
                     ]
 
-                    for selector in selectors:
+                    for strategy in search_strategies:
                         try:
-                            logger.info(f"Tentando selector: {selector}")
-                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            elements = strategy()
 
                             if elements:
                                 for element in elements:
                                     try:
-                                        # Tentar encontrar título e link
-                                        title = None
-                                        link = None
+                                        # Extrair informações do elemento
+                                        text = element.text.strip()
+                                        href = element.get_attribute('href')
 
-                                        # Tentar diferentes elementos para título
-                                        for title_selector in ['h3', '.title', 'a']:
-                                            try:
-                                                title_elem = element.find_element(By.CSS_SELECTOR, title_selector)
-                                                if title_elem and title_elem.text.strip():
-                                                    title = title_elem.text.strip()
-                                                    break
-                                            except:
-                                                continue
-
-                                        # Tentar obter link
-                                        try:
-                                            link_elem = element.find_element(By.TAG_NAME, 'a')
-                                            link = link_elem.get_attribute('href')
-                                        except:
-                                            try:
-                                                link = element.get_attribute('href')
-                                            except:
-                                                pass
-
-                                        if title and link:
+                                        if text and href:
                                             products.append({
-                                                "nome": title,
+                                                "nome": text,
                                                 "preco": None,
-                                                "link": link,
+                                                "link": href,
                                                 "imagem": None
                                             })
-
                                     except Exception as e:
                                         logger.error(f"Erro ao processar elemento: {str(e)}")
                                         continue
-
-                                if products:
-                                    logger.info(f"Encontrados {len(products)} produtos")
-                                    break
-
                         except Exception as e:
-                            logger.error(f"Erro com selector {selector}: {str(e)}")
+                            logger.error(f"Erro na estratégia de busca: {str(e)}")
                             continue
 
                     if products:
+                        logger.info(f"Encontrados {len(products)} produtos")
                         break
 
                 except Exception as e:
                     logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
                     if attempt < self.max_retries - 1:
-                        time.sleep(5)
+                        time.sleep(10)
                         self._initialize_driver()
 
             return products[:5]
