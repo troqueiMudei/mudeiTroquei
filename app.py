@@ -17,6 +17,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support import expected_conditions as EC
 import MySQLdb.cursors
 
 logging.basicConfig(level=logging.DEBUG)
@@ -238,57 +239,18 @@ class ProdutoFinder:
                 return []
 
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-            products = []
 
             for attempt in range(self.max_retries):
                 try:
                     logger.info(f"Tentativa {attempt + 1} de buscar produtos")
-
-                    # Remover limpeza de localStorage e sessionStorage
                     self.driver.delete_all_cookies()
-
-                    # Navegar para a URL
                     self.driver.get(search_url)
 
-                    # Esperar a página carregar
-                    time.sleep(20)  # Espera fixa inicial
-
-                    # Tentar diferentes estratégias de busca
-                    selectors = [
-                        "//div[contains(@class, 'UAiK1e')]",
-                        "//div[contains(@class, 'IZE3Td')]",
-                        "//a[contains(@href, 'google')]",
-                        "//div[contains(@class, 'kqKHvb')]"
-                    ]
-
-                    for selector in selectors:
-                        try:
-                            elements = WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_all_elements_located((By.XPATH, selector))
-                            )
-
-                            for element in elements:
-                                try:
-                                    text = element.text.strip()
-                                    href = element.get_attribute('href')
-
-                                    if text and href:
-                                        products.append({
-                                            "nome": text,
-                                            "preco": None,
-                                            "link": href,
-                                            "imagem": None
-                                        })
-                                except Exception as e:
-                                    logger.error(f"Erro ao processar elemento: {str(e)}")
-                                    continue
-
-                        except Exception as e:
-                            logger.error(f"Erro com selector {selector}: {str(e)}")
-                            continue
+                    # Usar o método extract_products_selenium
+                    products = self._extract_products_selenium()
 
                     if products:
-                        break
+                        return products
 
                 except Exception as e:
                     logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
@@ -296,7 +258,7 @@ class ProdutoFinder:
                         time.sleep(10)
                         self._initialize_driver()
 
-            return products[:5]
+            return []
 
         except Exception as e:
             logger.error(f"Erro geral na busca de produtos: {str(e)}")
@@ -309,75 +271,46 @@ class ProdutoFinder:
         try:
             # Esperar página carregar completamente
             time.sleep(15)
+            wait = WebDriverWait(self.driver, 10)
 
-            # Novo conjunto de seletores mais específicos
             selectors = [
-                "//div[contains(@class, 'UAiK1e')]",  # Seletor específico do Google Lens
-                "//div[contains(@class, 'IZE3Td')]",  # Outro seletor comum
-                "//div[contains(@class, 'RJuLyc')]",  # Container de resultados
-                "//a[contains(@class, 'VZqTOd')]",  # Links de produtos
-                "//div[contains(@class, 'kqKHvb')]"  # Container de itens
+                "//div[contains(@class, 'UAiK1e')]",
+                "//div[contains(@class, 'IZE3Td')]",
+                "//div[contains(@class, 'RJuLyc')]",
+                "//a[contains(@class, 'VZqTOd')]",
+                "//div[contains(@class, 'kqKHvb')]"
             ]
 
             for selector in selectors:
                 try:
-                    # Usar JavaScript para verificar elementos
-                    elements = self.driver.execute_script(f"""
-                        return document.evaluate(
-                            "{selector}",
-                            document,
-                            null,
-                            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-                            null
-                        );
-                    """)
+                    elements = wait.until(
+                        EC.presence_of_all_elements_located((By.XPATH, selector))
+                    )
 
-                    if elements and elements.snapshotLength > 0:
-                        for i in range(elements.snapshotLength):
-                            element = elements.snapshotItem(i)
+                    for element in elements:
+                        try:
+                            title = element.text.strip()
+                            link = element.get_attribute('href') or ''
 
-                            # Extrair informações usando JavaScript
-                            product_info = self.driver.execute_script("""
-                                function extractInfo(element) {
-                                    let title = '';
-                                    let link = '';
-
-                                    // Tentar diferentes maneiras de obter o título
-                                    const possibleTitleElements = element.querySelectorAll('h3, .title, a');
-                                    for (const el of possibleTitleElements) {
-                                        if (el.textContent.trim()) {
-                                            title = el.textContent.trim();
-                                            break;
-                                        }
-                                    }
-
-                                    // Tentar obter o link
-                                    const linkElement = element.querySelector('a');
-                                    if (linkElement) {
-                                        link = linkElement.href;
-                                    }
-
-                                    return {title, link};
-                                }
-                                return extractInfo(arguments[0]);
-                            """, element)
-
-                            if product_info['title'] and product_info['link']:
+                            if title and link:
                                 products.append({
-                                    "nome": product_info['title'],
+                                    "nome": title,
                                     "preco": None,
-                                    "link": product_info['link'],
+                                    "link": link,
                                     "imagem": None
                                 })
+                        except Exception as e:
+                            logger.error(f"Erro ao processar elemento: {str(e)}")
+                            continue
 
-                        if products:
-                            break
+                    if products:
+                        break
 
                 except Exception as e:
-                    logger.error(f"Erro ao extrair com selector {selector}: {str(e)}")
+                    logger.error(f"Erro com selector {selector}: {str(e)}")
                     continue
 
-            return products[:5]  # Limitar a 5 resultados
+            return products[:5]
 
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
