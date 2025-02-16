@@ -3,8 +3,6 @@ FROM python:3.10-slim
 # Configuração de variáveis de ambiente
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV CHROME_VERSION="114.0.5735.90-1"
-ENV CHROMEDRIVER_VERSION="114.0.5735.90"
 ENV TZ=America/Sao_Paulo
 
 # Configurações do Chrome
@@ -77,11 +75,13 @@ RUN useradd -m -s /bin/bash chrome_user
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
-    apt-get install -y google-chrome-stable=${CHROME_VERSION} && \
+    apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Instalar ChromeDriver
-RUN wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip && \
+# Descobrir e instalar a versão correspondente do ChromeDriver
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP "Chrome \K([0-9]+)") && \
+    CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") && \
+    wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" -O /tmp/chromedriver.zip && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
     rm /tmp/chromedriver.zip && \
     chmod 755 /usr/local/bin/chromedriver
