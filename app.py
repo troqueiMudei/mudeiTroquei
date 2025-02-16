@@ -107,45 +107,26 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 90  # Aumentado para 60 segundos
+        self.page_load_timeout = 90
 
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Essential configurations
+        # Adicionar user agent mais realista
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
+
+        # Configurações essenciais
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
-
-        # Performance improvements
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-browser-side-navigation')
-        chrome_options.add_argument('--disable-features=NetworkService')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        chrome_options.add_argument('--force-device-scale-factor=1')
 
-        # Memory optimization
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
-        chrome_options.add_argument('--disable-application-cache')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-logging')
-
-        prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2,
-            'disk-cache-size': 1,
-            'profile.password_manager_enabled': False,
-            'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads'
-        }
-        chrome_options.add_experimental_option('prefs', prefs)
+        # Adicionar argumentos para evitar detecção
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
         try:
             service = Service(
@@ -158,9 +139,12 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
+            # Executar JavaScript para evitar detecção
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
             self.driver.set_page_load_timeout(self.page_load_timeout)
             self.driver.set_script_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(20)  # Aumentado para 20 segundos
+            self.driver.implicitly_wait(20)
 
             return True
         except Exception as e:
@@ -279,73 +263,77 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         products = []
         try:
-            # Tenta diferentes estratégias de localização
-            xpaths = [
-                "//div[contains(@class, 'isv-r')]",
-                "//div[@class='g' or contains(@class, 'g-card')]",
-                "//div[.//h3 or .//a[@href]]",
-                "//div[contains(@style, 'background-image')]",
-                "//a[.//img]",
-                "//div[contains(@class, 'photo-result')]"  # Adicionado novo seletor
+            # Esperar página carregar completamente
+            time.sleep(15)
+
+            # Novo conjunto de seletores mais específicos
+            selectors = [
+                "//div[contains(@class, 'UAiK1e')]",  # Seletor específico do Google Lens
+                "//div[contains(@class, 'IZE3Td')]",  # Outro seletor comum
+                "//div[contains(@class, 'RJuLyc')]",  # Container de resultados
+                "//a[contains(@class, 'VZqTOd')]",  # Links de produtos
+                "//div[contains(@class, 'kqKHvb')]"  # Container de itens
             ]
 
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    elements = WebDriverWait(self.driver, 20).until(
-                        lambda d: d.find_elements(By.XPATH, xpath)
-                    )
-                    if elements:
-                        result_elements = elements
-                        break
-                except:
-                    continue
-            else:
-                return []
+                    # Usar JavaScript para verificar elementos
+                    elements = self.driver.execute_script(f"""
+                        return document.evaluate(
+                            "{selector}",
+                            document,
+                            null,
+                            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                            null
+                        );
+                    """)
 
-            result_elements = list(set(result_elements))[:10]
+                    if elements and elements.snapshotLength > 0:
+                        for i in range(elements.snapshotLength):
+                            element = elements.snapshotItem(i)
 
-            for element in result_elements:
-                try:
-                    # Extração do título com espera explícita
-                    title = None
-                    for title_xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a"]:
-                        try:
-                            title_element = WebDriverWait(element, 5).until(
-                                lambda d: element.find_element(By.XPATH, title_xpath)
-                            )
-                            title = title_element.text.strip()
-                            if title:
-                                break
-                        except:
-                            continue
+                            # Extrair informações usando JavaScript
+                            product_info = self.driver.execute_script("""
+                                function extractInfo(element) {
+                                    let title = '';
+                                    let link = '';
 
-                    if not title:
-                        continue
+                                    // Tentar diferentes maneiras de obter o título
+                                    const possibleTitleElements = element.querySelectorAll('h3, .title, a');
+                                    for (const el of possibleTitleElements) {
+                                        if (el.textContent.trim()) {
+                                            title = el.textContent.trim();
+                                            break;
+                                        }
+                                    }
 
-                    # Resto do código de extração permanece o mesmo
-                    link = None
-                    try:
-                        link_element = element.find_element(By.XPATH, ".//a")
-                        link = link_element.get_attribute('href')
-                    except:
-                        try:
-                            link = element.get_attribute('href')
-                        except:
-                            continue
+                                    // Tentar obter o link
+                                    const linkElement = element.querySelector('a');
+                                    if (linkElement) {
+                                        link = linkElement.href;
+                                    }
 
-                    if title and link:
-                        product = {
-                            "nome": title,
-                            "preco": None,
-                            "link": link,
-                            "imagem": None
-                        }
-                        products.append(product)
+                                    return {title, link};
+                                }
+                                return extractInfo(arguments[0]);
+                            """, element)
+
+                            if product_info['title'] and product_info['link']:
+                                products.append({
+                                    "nome": product_info['title'],
+                                    "preco": None,
+                                    "link": product_info['link'],
+                                    "imagem": None
+                                })
+
+                        if products:
+                            break
 
                 except Exception as e:
+                    logger.error(f"Erro ao extrair com selector {selector}: {str(e)}")
                     continue
 
-            return products
+            return products[:5]  # Limitar a 5 resultados
 
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
