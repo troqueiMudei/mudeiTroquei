@@ -17,7 +17,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support import expected_conditions as EC
 import MySQLdb.cursors
 
 logging.basicConfig(level=logging.DEBUG)
@@ -108,36 +107,45 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 90
-        self.implicit_wait = 30
-        self.explicit_wait = 10
+        self.page_load_timeout = 90  # Aumentado para 60 segundos
 
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Configurações básicas
+        # Essential configurations
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--window-size=1920,1080')
-
-        # Configurações adicionais para estabilidade
         chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--disable-software-rasterizer')
+
+        # Performance improvements
         chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-infobars')
-        chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--disable-browser-side-navigation')
+        chrome_options.add_argument('--disable-features=NetworkService')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        chrome_options.add_argument('--force-device-scale-factor=1')
 
-        # Configurações de memória
+        # Memory optimization
         chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--js-flags="--max-old-space-size=1024"')
+        chrome_options.add_argument('--disk-cache-size=1')
+        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--disable-application-cache')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-logging')
 
-        # User agent mais realista
-        chrome_options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,
+            'profile.default_content_settings.images': 2,
+            'disk-cache-size': 1,
+            'profile.password_manager_enabled': False,
+            'profile.default_content_settings.popups': 2,
+            'download.prompt_for_download': False,
+            'download.default_directory': '/tmp/downloads'
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
 
         try:
             service = Service(
@@ -151,46 +159,14 @@ class ProdutoFinder:
             )
 
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(self.implicit_wait)
+            self.driver.set_script_timeout(self.page_load_timeout)
+            self.driver.implicitly_wait(20)  # Aumentado para 20 segundos
 
             return True
         except Exception as e:
             logger.error(f"Driver initialization failed: {str(e)}")
             if self.driver:
                 self.driver.quit()
-            return False
-
-    def _safe_find_elements(self, selector, timeout=10):
-        """Método seguro para encontrar elementos com retry"""
-        try:
-            wait = WebDriverWait(self.driver, timeout)
-            elements = wait.until(
-                EC.presence_of_all_elements_located((By.XPATH, selector))
-            )
-            return elements
-        except Exception as e:
-            logger.error(f"Erro ao buscar elementos com selector {selector}: {str(e)}")
-            return []
-
-    def _wait_for_page_load(self):
-        """Espera a página carregar completamente"""
-        try:
-            # Espera inicial
-            time.sleep(20)
-
-            # Espera o estado 'complete' do documento
-            self.driver.execute_script("return document.readyState") == "complete"
-
-            # Verifica se há elementos básicos na página
-            basic_selectors = ['div', 'a', 'img']
-            for selector in basic_selectors:
-                elements = self.driver.find_elements(By.TAG_NAME, selector)
-                if elements:
-                    return True
-
-            return False
-        except Exception as e:
-            logger.error(f"Erro ao esperar carregamento da página: {str(e)}")
             return False
 
     def _convert_image_to_url(self, image):
@@ -240,103 +216,136 @@ class ProdutoFinder:
         self.cleanup()
 
     def cleanup(self):
+        """Explicit cleanup method"""
         if hasattr(self, 'driver') and self.driver:
             try:
                 self.driver.delete_all_cookies()
                 self.driver.quit()
             except Exception as e:
-                logger.error(f"Erro na limpeza: {str(e)}")
+                logger.error(f"Error in cleanup: {str(e)}")
             finally:
                 self.driver = None
 
     def buscar_produtos(self, imagem):
         try:
+            if not self.driver and not self._initialize_driver():
+                return []
+
+            img_url = self._convert_image_to_url(imagem)
+            if not img_url:
+                return []
+
+            search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
+            products = []
+
             for attempt in range(self.max_retries):
                 try:
-                    if not self.driver and not self._initialize_driver():
+                    self.driver.delete_all_cookies()
+
+                    # Adiciona tratamento de timeout na navegação
+                    try:
+                        self.driver.get(search_url)
+                    except Exception as e:
+                        logger.error(f"Navigation timeout on attempt {attempt + 1}: {str(e)}")
                         continue
 
-                    img_url = self._convert_image_to_url(imagem)
-                    if not img_url:
-                        return []
+                    # Espera explícita por elementos
+                    time.sleep(10)  # Espera inicial
 
-                    search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-
-                    # Limpar cookies e cache antes de cada tentativa
-                    self.driver.delete_all_cookies()
-                    self.driver.execute_script("window.localStorage.clear();")
-                    self.driver.execute_script("window.sessionStorage.clear();")
-
-                    self.driver.get(search_url)
-
-                    # Verificar se a página carregou corretamente
-                    if not self._wait_for_page_load():
-                        raise Exception("Página não carregou completamente")
-
-                    products = self._extract_products_selenium()
+                    # Tenta extrair produtos com diferentes tempos de espera
+                    for wait_time in [5, 10, 15]:
+                        products = self._extract_products_selenium()
+                        if products:
+                            break
+                        time.sleep(wait_time)
 
                     if products:
-                        return products
+                        break
 
                 except Exception as e:
-                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
+                    logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
                     if attempt < self.max_retries - 1:
-                        time.sleep(10)
-                        self.cleanup()
                         self._initialize_driver()
+                    time.sleep(5)  # Espera entre tentativas
 
-            return []
+            return products[:5]  # Limita resultados para reduzir uso de memória
 
         except Exception as e:
-            logger.error(f"Erro geral na busca de produtos: {str(e)}")
+            logger.error(f"Product search failed: {str(e)}")
             return []
         finally:
             self.cleanup()
 
     def _extract_products_selenium(self):
         products = []
-        wait_time = 15
-
         try:
-            # Esperar página carregar
-            time.sleep(wait_time)
-
-            selectors = [
-                "//div[contains(@class, 'UAiK1e')]",
-                "//div[contains(@class, 'IZE3Td')]",
-                "//div[contains(@class, 'RJuLyc')]",
-                "//a[contains(@class, 'VZqTOd')]",
-                "//div[contains(@class, 'kqKHvb')]"
+            # Tenta diferentes estratégias de localização
+            xpaths = [
+                "//div[contains(@class, 'isv-r')]",
+                "//div[@class='g' or contains(@class, 'g-card')]",
+                "//div[.//h3 or .//a[@href]]",
+                "//div[contains(@style, 'background-image')]",
+                "//a[.//img]",
+                "//div[contains(@class, 'photo-result')]"  # Adicionado novo seletor
             ]
 
-            for selector in selectors:
-                elements = self._safe_find_elements(selector)
+            for xpath in xpaths:
+                try:
+                    elements = WebDriverWait(self.driver, 20).until(
+                        lambda d: d.find_elements(By.XPATH, xpath)
+                    )
+                    if elements:
+                        result_elements = elements
+                        break
+                except:
+                    continue
+            else:
+                return []
 
-                if elements:
-                    for element in elements:
+            result_elements = list(set(result_elements))[:10]
+
+            for element in result_elements:
+                try:
+                    # Extração do título com espera explícita
+                    title = None
+                    for title_xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a"]:
                         try:
-                            # Rolar até o elemento
-                            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-                            time.sleep(0.5)  # Pequena pausa após scroll
-
-                            title = element.text.strip()
-                            link = element.get_attribute('href') or ''
-
-                            if title and link:
-                                products.append({
-                                    "nome": title,
-                                    "preco": None,
-                                    "link": link,
-                                    "imagem": None
-                                })
-                        except Exception as e:
-                            logger.error(f"Erro ao processar elemento: {str(e)}")
+                            title_element = WebDriverWait(element, 5).until(
+                                lambda d: element.find_element(By.XPATH, title_xpath)
+                            )
+                            title = title_element.text.strip()
+                            if title:
+                                break
+                        except:
                             continue
 
-                    if products:
-                        break
+                    if not title:
+                        continue
 
-            return products[:5]  # Retorna apenas os 5 primeiros produtos
+                    # Resto do código de extração permanece o mesmo
+                    link = None
+                    try:
+                        link_element = element.find_element(By.XPATH, ".//a")
+                        link = link_element.get_attribute('href')
+                    except:
+                        try:
+                            link = element.get_attribute('href')
+                        except:
+                            continue
+
+                    if title and link:
+                        product = {
+                            "nome": title,
+                            "preco": None,
+                            "link": link,
+                            "imagem": None
+                        }
+                        products.append(product)
+
+                except Exception as e:
+                    continue
+
+            return products
 
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
