@@ -112,21 +112,28 @@ class ProdutoFinder:
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Adicionar user agent mais realista
-        chrome_options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
-
-        # Configurações essenciais
+        # Configurações básicas
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
 
-        # Adicionar argumentos para evitar detecção
+        # User agent realista
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
+
+        # Configurações anti-detecção
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # Desabilitar imagens para melhor performance
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,
+            'profile.default_content_settings.images': 2
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
 
         try:
             service = Service(
@@ -139,11 +146,7 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
-            # Executar JavaScript para evitar detecção
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.set_script_timeout(self.page_load_timeout)
             self.driver.implicitly_wait(20)
 
             return True
@@ -200,13 +203,12 @@ class ProdutoFinder:
         self.cleanup()
 
     def cleanup(self):
-        """Explicit cleanup method"""
         if hasattr(self, 'driver') and self.driver:
             try:
                 self.driver.delete_all_cookies()
                 self.driver.quit()
             except Exception as e:
-                logger.error(f"Error in cleanup: {str(e)}")
+                logger.error(f"Erro na limpeza: {str(e)}")
             finally:
                 self.driver = None
 
@@ -224,38 +226,87 @@ class ProdutoFinder:
 
             for attempt in range(self.max_retries):
                 try:
+                    logger.info(f"Tentativa {attempt + 1} de buscar produtos")
                     self.driver.delete_all_cookies()
+                    self.driver.get(search_url)
 
-                    # Adiciona tratamento de timeout na navegação
-                    try:
-                        self.driver.get(search_url)
-                    except Exception as e:
-                        logger.error(f"Navigation timeout on attempt {attempt + 1}: {str(e)}")
-                        continue
+                    # Espera inicial
+                    time.sleep(15)
 
-                    # Espera explícita por elementos
-                    time.sleep(10)  # Espera inicial
+                    # Lista de seletores CSS mais simples
+                    selectors = [
+                        "div.UAiK1e",
+                        "div.IZE3Td",
+                        "div.RJuLyc",
+                        "div.kqKHvb",
+                        "a.VZqTOd"
+                    ]
 
-                    # Tenta extrair produtos com diferentes tempos de espera
-                    for wait_time in [5, 10, 15]:
-                        products = self._extract_products_selenium()
-                        if products:
-                            break
-                        time.sleep(wait_time)
+                    for selector in selectors:
+                        try:
+                            logger.info(f"Tentando selector: {selector}")
+                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+
+                            if elements:
+                                for element in elements:
+                                    try:
+                                        # Tentar encontrar título e link
+                                        title = None
+                                        link = None
+
+                                        # Tentar diferentes elementos para título
+                                        for title_selector in ['h3', '.title', 'a']:
+                                            try:
+                                                title_elem = element.find_element(By.CSS_SELECTOR, title_selector)
+                                                if title_elem and title_elem.text.strip():
+                                                    title = title_elem.text.strip()
+                                                    break
+                                            except:
+                                                continue
+
+                                        # Tentar obter link
+                                        try:
+                                            link_elem = element.find_element(By.TAG_NAME, 'a')
+                                            link = link_elem.get_attribute('href')
+                                        except:
+                                            try:
+                                                link = element.get_attribute('href')
+                                            except:
+                                                pass
+
+                                        if title and link:
+                                            products.append({
+                                                "nome": title,
+                                                "preco": None,
+                                                "link": link,
+                                                "imagem": None
+                                            })
+
+                                    except Exception as e:
+                                        logger.error(f"Erro ao processar elemento: {str(e)}")
+                                        continue
+
+                                if products:
+                                    logger.info(f"Encontrados {len(products)} produtos")
+                                    break
+
+                        except Exception as e:
+                            logger.error(f"Erro com selector {selector}: {str(e)}")
+                            continue
 
                     if products:
                         break
 
                 except Exception as e:
-                    logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
+                    logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
                     if attempt < self.max_retries - 1:
+                        time.sleep(5)
                         self._initialize_driver()
-                    time.sleep(5)  # Espera entre tentativas
 
-            return products[:5]  # Limita resultados para reduzir uso de memória
+            return products[:5]
 
         except Exception as e:
-            logger.error(f"Product search failed: {str(e)}")
+            logger.error(f"Erro geral na busca de produtos: {str(e)}")
             return []
         finally:
             self.cleanup()
