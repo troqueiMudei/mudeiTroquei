@@ -72,8 +72,26 @@ RUN apt-get update && apt-get install -y \
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
-    && apt-get install -y google-chrome-stable \
+    && apt-get install -y google-chrome-stable=${CHROME_VERSION} \
     && rm -rf /var/lib/apt/lists/*
+
+# Garantir que as permissões estejam corretas
+RUN chmod -R 755 /usr/local/bin/chromedriver \
+    && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver
+
+# Adicionar configurações específicas do Chrome
+RUN mkdir -p /home/chrome_user/.config/google-chrome/Default \
+    && echo '{ \
+        "download_prompt_for_download": false, \
+        "download.default_directory": "/tmp/downloads", \
+        "browser": { \
+            "custom_chrome_frame": false, \
+            "show_home_button": false \
+        }, \
+        "safebrowsing": { \
+            "enabled": false \
+        } \
+    }' > /home/chrome_user/.config/google-chrome/Default/Preferences
 
 # Install ChromeDriver
 RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \

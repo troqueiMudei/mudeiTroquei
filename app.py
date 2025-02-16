@@ -118,11 +118,10 @@ class ProdutoFinder:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--window-size=1920,1080')
 
-        # Configurações adicionais para evitar detecção
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        # Configurações para evitar problemas com localStorage
         chrome_options.add_argument('--disable-web-security')
         chrome_options.add_argument('--allow-running-insecure-content')
-        chrome_options.add_argument('--lang=pt-BR,pt')
+        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
 
         # User agent mais realista
         chrome_options.add_argument(
@@ -142,9 +141,8 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
-            # Configurar timeouts
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(30)  # Aumentado para 30 segundos
+            self.driver.implicitly_wait(30)
 
             return True
         except Exception as e:
@@ -246,67 +244,50 @@ class ProdutoFinder:
                 try:
                     logger.info(f"Tentativa {attempt + 1} de buscar produtos")
 
-                    # Limpar cookies e cache
+                    # Remover limpeza de localStorage e sessionStorage
                     self.driver.delete_all_cookies()
-                    self.driver.execute_script("window.localStorage.clear();")
-                    self.driver.execute_script("window.sessionStorage.clear();")
 
                     # Navegar para a URL
                     self.driver.get(search_url)
 
                     # Esperar a página carregar
-                    if not self._wait_for_page_load():
-                        logger.error("Página não carregou completamente")
-                        continue
-
-                    # Capturar screenshot para debug
-                    self.driver.save_screenshot(f"/tmp/debug_screenshot_{attempt}.png")
-
-                    # Logar HTML para debug
-                    logger.debug(f"HTML da página: {self.driver.page_source[:1000]}")
+                    time.sleep(20)  # Espera fixa inicial
 
                     # Tentar diferentes estratégias de busca
-                    search_strategies = [
-                        # Estratégia 1: Elementos genéricos com links
-                        lambda: self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="google"]'),
-
-                        # Estratégia 2: Divs com imagens
-                        lambda: self.driver.find_elements(By.CSS_SELECTOR, 'div:has(img)'),
-
-                        # Estratégia 3: Elementos clicáveis
-                        lambda: self.driver.find_elements(By.CSS_SELECTOR, '[role="button"], [tabindex="0"]'),
-
-                        # Estratégia 4: Elementos com texto
-                        lambda: self.driver.find_elements(By.XPATH, '//*[string-length(text()) > 20]')
+                    selectors = [
+                        "//div[contains(@class, 'UAiK1e')]",
+                        "//div[contains(@class, 'IZE3Td')]",
+                        "//a[contains(@href, 'google')]",
+                        "//div[contains(@class, 'kqKHvb')]"
                     ]
 
-                    for strategy in search_strategies:
+                    for selector in selectors:
                         try:
-                            elements = strategy()
+                            elements = WebDriverWait(self.driver, 10).until(
+                                EC.presence_of_all_elements_located((By.XPATH, selector))
+                            )
 
-                            if elements:
-                                for element in elements:
-                                    try:
-                                        # Extrair informações do elemento
-                                        text = element.text.strip()
-                                        href = element.get_attribute('href')
+                            for element in elements:
+                                try:
+                                    text = element.text.strip()
+                                    href = element.get_attribute('href')
 
-                                        if text and href:
-                                            products.append({
-                                                "nome": text,
-                                                "preco": None,
-                                                "link": href,
-                                                "imagem": None
-                                            })
-                                    except Exception as e:
-                                        logger.error(f"Erro ao processar elemento: {str(e)}")
-                                        continue
+                                    if text and href:
+                                        products.append({
+                                            "nome": text,
+                                            "preco": None,
+                                            "link": href,
+                                            "imagem": None
+                                        })
+                                except Exception as e:
+                                    logger.error(f"Erro ao processar elemento: {str(e)}")
+                                    continue
+
                         except Exception as e:
-                            logger.error(f"Erro na estratégia de busca: {str(e)}")
+                            logger.error(f"Erro com selector {selector}: {str(e)}")
                             continue
 
                     if products:
-                        logger.info(f"Encontrados {len(products)} produtos")
                         break
 
                 except Exception as e:
