@@ -107,7 +107,7 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        # self.page_load_timeout = 90  # Aumentado para 60 segundos
+        self.page_load_timeout = 90  # Aumentado para 60 segundos
 
     def _initialize_driver(self):
         chrome_options = Options()
