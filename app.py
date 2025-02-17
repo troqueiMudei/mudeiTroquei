@@ -462,7 +462,7 @@ def upload_produto():
 @login_required
 def lista_cadastros():
     status_filtro = request.args.get('status')
-    cur = mysql.connection.cursor()
+    cur = mysql.connection.cursor(dictionary=True)  # Change to dictionary cursor
 
     if status_filtro:
         cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
@@ -471,22 +471,41 @@ def lista_cadastros():
 
     fichas = cur.fetchall()
     cur.close()
+
+    # Process the values to ensure they're in the correct format
+    for ficha in fichas:
+        # Convert decimal values to float for proper template rendering
+        if ficha['valor'] is not None:
+            ficha['valor'] = float(ficha['valor'])
+        else:
+            ficha['valor'] = 0.0
+
+        # Handle other decimal fields if needed
+        for field in ['altura', 'largura', 'profundidade', 'quantidade']:
+            if ficha[field] is not None:
+                ficha[field] = float(ficha[field])
+            else:
+                ficha[field] = 0.0
+
     return render_template('lista.html', fichas=fichas)
 
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    cur = mysql.connection.cursor()
+    cur = mysql.connection.cursor(dictionary=True)  # Change to dictionary cursor
     cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
     ficha = cur.fetchone()
     cur.close()
+
+    if not ficha:
+        return "Ficha não encontrada", 404
 
     # Decodifica os links e fotos dos produtos
     ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
     ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
 
-    # Cálculo do valor estimado
-    valor_estimado = float(ficha['valor'])
+    # Ensure valor is a float
+    valor_estimado = float(ficha['valor']) if ficha['valor'] is not None else 0.0
 
     if ficha['desmontagem'] == 'Sim':
         valor_estimado -= 50.00
@@ -508,7 +527,7 @@ def detalhes_ficha(id):
 
     # Converter a data para o formato brasileiro (DD/MM/AAAA)
     if ficha['dtCompra']:
-        data_compra = datetime.strptime(ficha['dtCompra'], '%Y-%m-%d')
+        data_compra = datetime.strptime(str(ficha['dtCompra']), '%Y-%m-%d')
         ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
     else:
         ficha['dtCompra_br'] = "Data não informada"
