@@ -107,43 +107,33 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 90  # Aumentado para 60 segundos
+        self.page_load_timeout = 120
 
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Essential configurations
+        # Configurações essenciais
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
-
-        # Performance improvements
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-browser-side-navigation')
-        chrome_options.add_argument('--disable-features=NetworkService')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        chrome_options.add_argument('--force-device-scale-factor=1')
 
-        # Memory optimization
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
-        chrome_options.add_argument('--disable-application-cache')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-logging')
+        # Novas configurações para melhorar a estabilidade
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--allow-running-insecure-content')
+        chrome_options.add_argument('--lang=pt-BR')
+
+        # User agent mais realista
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
         prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2,
-            'disk-cache-size': 1,
-            'profile.password_manager_enabled': False,
-            'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads'
+            'profile.managed_default_content_settings.images': 1,  # Permitir imagens
+            'profile.default_content_settings.images': 1,
+            'disk-cache-size': 4096,
+            'profile.default_content_settings.popups': 0
         }
         chrome_options.add_experimental_option('prefs', prefs)
 
@@ -160,7 +150,10 @@ class ProdutoFinder:
 
             self.driver.set_page_load_timeout(self.page_load_timeout)
             self.driver.set_script_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(20)  # Aumentado para 20 segundos
+            self.driver.implicitly_wait(30)  # Aumentado para 30 segundos
+
+            # Executar JavaScript para mascarar a automação
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
             return True
         except Exception as e:
@@ -279,116 +272,94 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         products = []
         try:
-            # Espera inicial mais longa para garantir carregamento completo
-            time.sleep(15)
+            # Espera inicial mais longa
+            time.sleep(20)
 
-            # Seletores específicos do Google Lens
+            # Executa scroll para carregar mais conteúdo
+            self.driver.execute_script("""
+                function scrollToBottom() {
+                    window.scrollTo(0, document.body.scrollHeight);
+                    return document.body.scrollHeight;
+                }
+                for(let i = 0; i < 3; i++) {
+                    let lastHeight = scrollToBottom();
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            """)
+
+            # Seletores atualizados do Google Lens
             main_selectors = [
-                "//div[contains(@class, 'UAiK1e')]",  # Seletor principal para resultados
-                "//a[contains(@class, 'VZqTOd')]",  # Links de produtos
-                "//div[contains(@class, 'aoDO7b')]",  # Container de itens similares
-                "//div[contains(@class, 'ltKhG')]"  # Container de resultados visuais
+                "//div[contains(@class, 'DeMn3d')]",  # Novo seletor principal
+                "//div[contains(@class, 'UAiK1e')]",
+                "//div[contains(@class, 'LsIM1d')]",  # Novo seletor para resultados visuais
+                "//div[contains(@class, 'Asszc')]"  # Novo seletor para produtos similares
             ]
 
-            # Tenta cada seletor principal
-            result_elements = None
             for selector in main_selectors:
                 try:
-                    logger.debug(f"Tentando seletor: {selector}")
-                    result_elements = WebDriverWait(self.driver, 10).until(
+                    elements = WebDriverWait(self.driver, 15).until(
                         lambda d: d.find_elements(By.XPATH, selector)
                     )
-                    if result_elements:
-                        logger.debug(f"Encontrados {len(result_elements)} elementos com seletor {selector}")
-                        break
-                except Exception as e:
-                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
-                    continue
+                    if elements:
+                        for element in elements:
+                            try:
+                                product = {}
 
-            if not result_elements:
-                # Se não encontrou elementos, tenta fazer scroll e esperar mais
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(5)
+                                # Tenta diferentes seletores para o título
+                                for title_selector in [".DdmvCb", ".UAiK1e", "[role='heading']"]:
+                                    try:
+                                        title = element.find_element(By.CSS_SELECTOR, title_selector)
+                                        product['nome'] = title.text.strip()
+                                        break
+                                    except:
+                                        continue
 
-                # Screenshot para debug
-                self.driver.save_screenshot("/tmp/debug_screenshot.png")
-                logger.debug("Screenshot salvo em /tmp/debug_screenshot.png")
+                                # Tenta diferentes seletores para o preço
+                                for price_selector in [".T14wmb", ".YbBE9b", "[aria-label*='R$']"]:
+                                    try:
+                                        price = element.find_element(By.CSS_SELECTOR, price_selector)
+                                        price_text = price.text.strip()
+                                        if price_text:
+                                            price_clean = ''.join(filter(str.isdigit, price_text.replace(',', '.')))
+                                            product['preco'] = float(price_clean) if price_clean else None
+                                        break
+                                    except:
+                                        continue
 
-                # Tenta novamente após scroll
-                for selector in main_selectors:
-                    try:
-                        result_elements = WebDriverWait(self.driver, 10).until(
-                            lambda d: d.find_elements(By.XPATH, selector)
-                        )
-                        if result_elements:
-                            break
-                    except:
-                        continue
+                                # Tenta diferentes seletores para o link
+                                try:
+                                    link = element.find_element(By.TAG_NAME, "a")
+                                    product['link'] = link.get_attribute('href')
+                                except:
+                                    continue
 
-            if not result_elements:
-                logger.error("Nenhum elemento encontrado após todas as tentativas")
-                return []
+                                # Tenta diferentes seletores para a imagem
+                                for img_selector in ["img", "[style*='background-image']"]:
+                                    try:
+                                        img = element.find_element(By.CSS_SELECTOR, img_selector)
+                                        product['imagem'] = img.get_attribute('src')
+                                        if not product['imagem']:
+                                            style = img.get_attribute('style')
+                                            if style and 'background-image' in style:
+                                                product['imagem'] = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(
+                                                    1)
+                                        break
+                                    except:
+                                        continue
 
-            # Limita resultados para processamento
-            result_elements = list(set(result_elements))[:10]
+                                if product.get('nome') and product.get('link'):
+                                    products.append(product)
+                                    logger.info(f"Produto encontrado: {product['nome']}")
 
-            for element in result_elements:
-                try:
-                    # Extração usando atributos específicos do Google Lens
-                    product = {}
-
-                    # Tenta extrair título/nome do produto
-                    try:
-                        title_element = element.find_element(By.CSS_SELECTOR, "[role='heading'], .UAiK1e, .VZqTOd")
-                        product['nome'] = title_element.text.strip()
-                    except:
-                        try:
-                            title_element = element.find_element(By.CSS_SELECTOR, "a, span")
-                            product['nome'] = title_element.text.strip()
-                        except:
-                            continue
-
-                    # Tenta extrair link
-                    try:
-                        link_element = element if element.tag_name == 'a' else element.find_element(By.TAG_NAME, 'a')
-                        product['link'] = link_element.get_attribute('href')
-                    except:
-                        continue
-
-                    # Tenta extrair preço
-                    try:
-                        price_element = element.find_element(By.CSS_SELECTOR,
-                                                             "[aria-label*='R$'], [aria-label*='preço'], .T14wmb")
-                        price_text = price_element.text.strip()
-                        if price_text:
-                            # Limpa o texto do preço e converte para número
-                            price_clean = ''.join(filter(str.isdigit, price_text.replace(',', '.')))
-                            product['preco'] = float(price_clean) if price_clean else None
-                    except:
-                        product['preco'] = None
-
-                    # Tenta extrair imagem
-                    try:
-                        img_element = element.find_element(By.CSS_SELECTOR, "img, [style*='background-image']")
-                        product['imagem'] = img_element.get_attribute('src')
-                        if not product['imagem']:
-                            style = img_element.get_attribute('style')
-                            if style and 'background-image' in style:
-                                product['imagem'] = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
-                    except:
-                        product['imagem'] = None
-
-                    # Adiciona o produto se tiver pelo menos nome e link
-                    if product.get('nome') and product.get('link'):
-                        products.append(product)
-                        logger.info(f"Produto encontrado: {product['nome']}")
-                        logger.debug(f"Detalhes do produto: {product}")
+                            except Exception as e:
+                                logger.error(f"Erro ao processar elemento: {str(e)}")
+                                continue
 
                 except Exception as e:
-                    logger.error(f"Erro ao processar elemento: {str(e)}")
+                    logger.error(f"Erro com seletor {selector}: {str(e)}")
                     continue
 
-            return products
+            return products[:5]  # Retorna apenas os 5 primeiros produtos
 
         except Exception as e:
             logger.error(f"Erro geral ao extrair produtos: {str(e)}")
