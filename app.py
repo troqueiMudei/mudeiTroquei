@@ -279,39 +279,64 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         products = []
         try:
-            # Tenta diferentes estratégias de localização
-            xpaths = [
-                "//div[contains(@class, 'isv-r')]",
-                "//div[@class='g' or contains(@class, 'g-card')]",
-                "//div[.//h3 or .//a[@href]]",
-                "//div[contains(@style, 'background-image')]",
-                "//a[.//img]",
-                "//div[contains(@class, 'photo-result')]"  # Adicionado novo seletor
-            ]
+            # Espera inicial para carregamento da página
+            time.sleep(10)
 
-            for xpath in xpaths:
+            # Lista de seletores para diferentes elementos da página
+            selectors = {
+                'container': [
+                    "//div[contains(@class, 'isv-r')]",
+                    "//div[contains(@class, 'g')]",
+                    "//div[contains(@class, 'photo-result')]",
+                    "//div[contains(@class, 'search-result')]"
+                ],
+                'title': [
+                    ".//h3",
+                    ".//div[contains(@class, 'title')]",
+                    ".//a[contains(@class, 'title')]",
+                    ".//span[contains(@class, 'title')]"
+                ],
+                'price': [
+                    ".//span[contains(text(), 'R$')]",
+                    ".//div[contains(@class, 'price')]",
+                    ".//span[contains(@class, 'price')]",
+                    ".//div[contains(text(), 'R$')]"
+                ],
+                'image': [
+                    ".//img",
+                    ".//div[contains(@class, 'image')]//img",
+                    ".//div[contains(@style, 'background-image')]"
+                ]
+            }
+
+            # Tenta encontrar containers de produto usando diferentes seletores
+            result_elements = None
+            for selector in selectors['container']:
                 try:
-                    elements = WebDriverWait(self.driver, 20).until(
-                        lambda d: d.find_elements(By.XPATH, xpath)
+                    result_elements = WebDriverWait(self.driver, 20).until(
+                        lambda d: d.find_elements(By.XPATH, selector)
                     )
-                    if elements:
-                        result_elements = elements
+                    if result_elements:
                         break
-                except:
+                except Exception as e:
+                    logger.debug(f"Tentativa de seletor de container falhou: {selector}")
                     continue
-            else:
+
+            if not result_elements:
+                logger.error("Nenhum container de produto encontrado")
                 return []
 
+            # Limita o número de resultados para processamento
             result_elements = list(set(result_elements))[:10]
 
             for element in result_elements:
                 try:
-                    # Extração do título com espera explícita
+                    # Extração do título
                     title = None
-                    for title_xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a"]:
+                    for title_selector in selectors['title']:
                         try:
                             title_element = WebDriverWait(element, 5).until(
-                                lambda d: element.find_element(By.XPATH, title_xpath)
+                                lambda d: element.find_element(By.XPATH, title_selector)
                             )
                             title = title_element.text.strip()
                             if title:
@@ -319,10 +344,19 @@ class ProdutoFinder:
                         except:
                             continue
 
-                    if not title:
-                        continue
+                    # Extração do preço
+                    price = None
+                    for price_selector in selectors['price']:
+                        try:
+                            price_element = element.find_element(By.XPATH, price_selector)
+                            price_text = price_element.text.strip()
+                            # Extrai apenas os números do preço
+                            price = float(''.join(filter(str.isdigit, price_text.replace(',', '.'))))
+                            break
+                        except:
+                            continue
 
-                    # Resto do código de extração permanece o mesmo
+                    # Extração do link
                     link = None
                     try:
                         link_element = element.find_element(By.XPATH, ".//a")
@@ -333,16 +367,33 @@ class ProdutoFinder:
                         except:
                             continue
 
-                    if title and link:
+                    # Extração da imagem
+                    image_url = None
+                    for image_selector in selectors['image']:
+                        try:
+                            img_element = element.find_element(By.XPATH, image_selector)
+                            image_url = img_element.get_attribute('src')
+                            if not image_url:
+                                style = img_element.get_attribute('style')
+                                if style and 'background-image' in style:
+                                    image_url = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
+                            if image_url:
+                                break
+                        except:
+                            continue
+
+                    if title and link:  # Permite produtos mesmo sem preço ou imagem
                         product = {
                             "nome": title,
-                            "preco": None,
+                            "preco": price,
                             "link": link,
-                            "imagem": None
+                            "imagem": image_url
                         }
                         products.append(product)
+                        logger.info(f"Produto encontrado: {title}")
 
                 except Exception as e:
+                    logger.error(f"Erro ao processar elemento: {str(e)}")
                     continue
 
             return products
