@@ -279,118 +279,110 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         products = []
         try:
-            # Espera inicial para carregamento da página
-            time.sleep(10)
+            # Espera inicial mais longa para garantir carregamento completo
+            time.sleep(15)
 
-            # Lista de seletores para diferentes elementos da página
-            selectors = {
-                'container': [
-                    "//div[contains(@class, 'isv-r')]",
-                    "//div[contains(@class, 'g')]",
-                    "//div[contains(@class, 'photo-result')]",
-                    "//div[contains(@class, 'search-result')]"
-                ],
-                'title': [
-                    ".//h3",
-                    ".//div[contains(@class, 'title')]",
-                    ".//a[contains(@class, 'title')]",
-                    ".//span[contains(@class, 'title')]"
-                ],
-                'price': [
-                    ".//span[contains(text(), 'R$')]",
-                    ".//div[contains(@class, 'price')]",
-                    ".//span[contains(@class, 'price')]",
-                    ".//div[contains(text(), 'R$')]"
-                ],
-                'image': [
-                    ".//img",
-                    ".//div[contains(@class, 'image')]//img",
-                    ".//div[contains(@style, 'background-image')]"
-                ]
-            }
+            # Seletores específicos do Google Lens
+            main_selectors = [
+                "//div[contains(@class, 'UAiK1e')]",  # Seletor principal para resultados
+                "//a[contains(@class, 'VZqTOd')]",  # Links de produtos
+                "//div[contains(@class, 'aoDO7b')]",  # Container de itens similares
+                "//div[contains(@class, 'ltKhG')]"  # Container de resultados visuais
+            ]
 
-            # Tenta encontrar containers de produto usando diferentes seletores
+            # Tenta cada seletor principal
             result_elements = None
-            for selector in selectors['container']:
+            for selector in main_selectors:
                 try:
-                    result_elements = WebDriverWait(self.driver, 20).until(
+                    logger.debug(f"Tentando seletor: {selector}")
+                    result_elements = WebDriverWait(self.driver, 10).until(
                         lambda d: d.find_elements(By.XPATH, selector)
                     )
                     if result_elements:
+                        logger.debug(f"Encontrados {len(result_elements)} elementos com seletor {selector}")
                         break
                 except Exception as e:
-                    logger.debug(f"Tentativa de seletor de container falhou: {selector}")
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
                     continue
 
             if not result_elements:
-                logger.error("Nenhum container de produto encontrado")
+                # Se não encontrou elementos, tenta fazer scroll e esperar mais
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(5)
+
+                # Screenshot para debug
+                self.driver.save_screenshot("/tmp/debug_screenshot.png")
+                logger.debug("Screenshot salvo em /tmp/debug_screenshot.png")
+
+                # Tenta novamente após scroll
+                for selector in main_selectors:
+                    try:
+                        result_elements = WebDriverWait(self.driver, 10).until(
+                            lambda d: d.find_elements(By.XPATH, selector)
+                        )
+                        if result_elements:
+                            break
+                    except:
+                        continue
+
+            if not result_elements:
+                logger.error("Nenhum elemento encontrado após todas as tentativas")
                 return []
 
-            # Limita o número de resultados para processamento
+            # Limita resultados para processamento
             result_elements = list(set(result_elements))[:10]
 
             for element in result_elements:
                 try:
-                    # Extração do título
-                    title = None
-                    for title_selector in selectors['title']:
-                        try:
-                            title_element = WebDriverWait(element, 5).until(
-                                lambda d: element.find_element(By.XPATH, title_selector)
-                            )
-                            title = title_element.text.strip()
-                            if title:
-                                break
-                        except:
-                            continue
+                    # Extração usando atributos específicos do Google Lens
+                    product = {}
 
-                    # Extração do preço
-                    price = None
-                    for price_selector in selectors['price']:
-                        try:
-                            price_element = element.find_element(By.XPATH, price_selector)
-                            price_text = price_element.text.strip()
-                            # Extrai apenas os números do preço
-                            price = float(''.join(filter(str.isdigit, price_text.replace(',', '.'))))
-                            break
-                        except:
-                            continue
-
-                    # Extração do link
-                    link = None
+                    # Tenta extrair título/nome do produto
                     try:
-                        link_element = element.find_element(By.XPATH, ".//a")
-                        link = link_element.get_attribute('href')
+                        title_element = element.find_element(By.CSS_SELECTOR, "[role='heading'], .UAiK1e, .VZqTOd")
+                        product['nome'] = title_element.text.strip()
                     except:
                         try:
-                            link = element.get_attribute('href')
+                            title_element = element.find_element(By.CSS_SELECTOR, "a, span")
+                            product['nome'] = title_element.text.strip()
                         except:
                             continue
 
-                    # Extração da imagem
-                    image_url = None
-                    for image_selector in selectors['image']:
-                        try:
-                            img_element = element.find_element(By.XPATH, image_selector)
-                            image_url = img_element.get_attribute('src')
-                            if not image_url:
-                                style = img_element.get_attribute('style')
-                                if style and 'background-image' in style:
-                                    image_url = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
-                            if image_url:
-                                break
-                        except:
-                            continue
+                    # Tenta extrair link
+                    try:
+                        link_element = element if element.tag_name == 'a' else element.find_element(By.TAG_NAME, 'a')
+                        product['link'] = link_element.get_attribute('href')
+                    except:
+                        continue
 
-                    if title and link:  # Permite produtos mesmo sem preço ou imagem
-                        product = {
-                            "nome": title,
-                            "preco": price,
-                            "link": link,
-                            "imagem": image_url
-                        }
+                    # Tenta extrair preço
+                    try:
+                        price_element = element.find_element(By.CSS_SELECTOR,
+                                                             "[aria-label*='R$'], [aria-label*='preço'], .T14wmb")
+                        price_text = price_element.text.strip()
+                        if price_text:
+                            # Limpa o texto do preço e converte para número
+                            price_clean = ''.join(filter(str.isdigit, price_text.replace(',', '.')))
+                            product['preco'] = float(price_clean) if price_clean else None
+                    except:
+                        product['preco'] = None
+
+                    # Tenta extrair imagem
+                    try:
+                        img_element = element.find_element(By.CSS_SELECTOR, "img, [style*='background-image']")
+                        product['imagem'] = img_element.get_attribute('src')
+                        if not product['imagem']:
+                            style = img_element.get_attribute('style')
+                            if style and 'background-image' in style:
+                                product['imagem'] = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
+                    except:
+                        product['imagem'] = None
+
+                    # Adiciona o produto se tiver pelo menos nome e link
+                    if product.get('nome') and product.get('link'):
                         products.append(product)
-                        logger.info(f"Produto encontrado: {title}")
+                        logger.info(f"Produto encontrado: {product['nome']}")
+                        logger.debug(f"Detalhes do produto: {product}")
 
                 except Exception as e:
                     logger.error(f"Erro ao processar elemento: {str(e)}")
@@ -399,7 +391,7 @@ class ProdutoFinder:
             return products
 
         except Exception as e:
-            logger.error(f"Erro ao extrair produtos: {str(e)}")
+            logger.error(f"Erro geral ao extrair produtos: {str(e)}")
             return []
 
 
