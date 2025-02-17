@@ -14,6 +14,9 @@ ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
 ENV CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer"
 ENV TZ=America/Sao_Paulo
 
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Create required directories with proper permissions

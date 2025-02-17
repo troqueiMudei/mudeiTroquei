@@ -112,25 +112,22 @@ class ProdutoFinder:
     def _initialize_driver(self):
         chrome_options = Options()
 
-        # Configurações essenciais
+        # Updated Chrome options for better stability
         chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
-
-        # Novas configurações para melhorar a estabilidade
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--allow-running-insecure-content')
-        chrome_options.add_argument('--lang=pt-BR')
+        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
 
-        # User agent mais realista
+        # Add more realistic user agent
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
         prefs = {
-            'profile.managed_default_content_settings.images': 1,  # Permitir imagens
+            'profile.managed_default_content_settings.images': 1,
             'profile.default_content_settings.images': 1,
             'disk-cache-size': 4096,
             'profile.default_content_settings.popups': 0
@@ -143,17 +140,15 @@ class ProdutoFinder:
                 log_path='/dev/null'
             )
 
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
-
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.set_script_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(30)  # Aumentado para 30 segundos
 
-            # Executar JavaScript para mascarar a automação
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            # Execute stealth JavaScript
+            self.driver.execute_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                window.navigator.chrome = {runtime: {}};
+                Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
+            """)
 
             return True
         except Exception as e:
@@ -272,78 +267,84 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         products = []
         try:
-            # Espera inicial mais longa
-            time.sleep(20)
+            # Initial wait for page load
+            time.sleep(10)
 
-            # Executa scroll para carregar mais conteúdo
-            self.driver.execute_script("""
-                function scrollToBottom() {
-                    window.scrollTo(0, document.body.scrollHeight);
-                    return document.body.scrollHeight;
-                }
-                for(let i = 0; i < 3; i++) {
-                    let lastHeight = scrollToBottom();
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-            """)
-
-            # Seletores atualizados do Google Lens
-            main_selectors = [
-                "//div[contains(@class, 'DeMn3d')]",  # Novo seletor principal
-                "//div[contains(@class, 'UAiK1e')]",
-                "//div[contains(@class, 'LsIM1d')]",  # Novo seletor para resultados visuais
-                "//div[contains(@class, 'Asszc')]"  # Novo seletor para produtos similares
+            # Updated selectors for Google Lens
+            product_selectors = [
+                "//div[contains(@class, 'gVg2wf')]",  # Main product container
+                "//div[contains(@class, 'GZrdsf')]",  # Alternative product container
+                "//div[contains(@class, 'UAiK1e')]",  # Product card
+                "//div[contains(@role, 'listitem')]"  # Generic product listing
             ]
 
-            for selector in main_selectors:
+            # Try each selector
+            for selector in product_selectors:
                 try:
-                    elements = WebDriverWait(self.driver, 15).until(
+                    # Wait for elements with explicit wait
+                    wait = WebDriverWait(self.driver, 20)
+                    elements = wait.until(
                         lambda d: d.find_elements(By.XPATH, selector)
                     )
+
                     if elements:
                         for element in elements:
                             try:
                                 product = {}
 
-                                # Tenta diferentes seletores para o título
-                                for title_selector in [".DdmvCb", ".UAiK1e", "[role='heading']"]:
+                                # Updated selectors for product details
+                                title_selectors = [".//div[@role='heading']", ".//h3",
+                                                   ".//div[contains(@class, 'UAiK1e')]"]
+                                price_selectors = [".//span[contains(@class, 'T14wmb')]",
+                                                   ".//span[contains(text(),'R$')]",
+                                                   ".//div[contains(@class, 'YbBE9b')]"]
+                                link_selectors = [".//a[@href]", ".//div[@role='link']"]
+                                image_selectors = [".//img", ".//div[contains(@class, 'DnR2hf')]"]
+
+                                # Get product title
+                                for title_selector in title_selectors:
                                     try:
-                                        title = element.find_element(By.CSS_SELECTOR, title_selector)
+                                        title = element.find_element(By.XPATH, title_selector)
                                         product['nome'] = title.text.strip()
-                                        break
+                                        if product['nome']:
+                                            break
                                     except:
                                         continue
 
-                                # Tenta diferentes seletores para o preço
-                                for price_selector in [".T14wmb", ".YbBE9b", "[aria-label*='R$']"]:
+                                # Get product price
+                                for price_selector in price_selectors:
                                     try:
-                                        price = element.find_element(By.CSS_SELECTOR, price_selector)
+                                        price = element.find_element(By.XPATH, price_selector)
                                         price_text = price.text.strip()
                                         if price_text:
                                             price_clean = ''.join(filter(str.isdigit, price_text.replace(',', '.')))
                                             product['preco'] = float(price_clean) if price_clean else None
-                                        break
+                                            break
                                     except:
                                         continue
 
-                                # Tenta diferentes seletores para o link
-                                try:
-                                    link = element.find_element(By.TAG_NAME, "a")
-                                    product['link'] = link.get_attribute('href')
-                                except:
-                                    continue
-
-                                # Tenta diferentes seletores para a imagem
-                                for img_selector in ["img", "[style*='background-image']"]:
+                                # Get product link
+                                for link_selector in link_selectors:
                                     try:
-                                        img = element.find_element(By.CSS_SELECTOR, img_selector)
+                                        link = element.find_element(By.XPATH, link_selector)
+                                        product['link'] = link.get_attribute('href')
+                                        if product['link']:
+                                            break
+                                    except:
+                                        continue
+
+                                # Get product image
+                                for img_selector in image_selectors:
+                                    try:
+                                        img = element.find_element(By.XPATH, img_selector)
                                         product['imagem'] = img.get_attribute('src')
                                         if not product['imagem']:
                                             style = img.get_attribute('style')
                                             if style and 'background-image' in style:
                                                 product['imagem'] = re.search(r'url\(["\']?(.*?)["\']?\)', style).group(
                                                     1)
-                                        break
+                                        if product['imagem']:
+                                            break
                                     except:
                                         continue
 
@@ -352,14 +353,17 @@ class ProdutoFinder:
                                     logger.info(f"Produto encontrado: {product['nome']}")
 
                             except Exception as e:
-                                logger.error(f"Erro ao processar elemento: {str(e)}")
+                                logger.error(f"Erro ao processar elemento individual: {str(e)}")
                                 continue
+
+                        if products:
+                            break  # If we found products with this selector, stop trying others
 
                 except Exception as e:
                     logger.error(f"Erro com seletor {selector}: {str(e)}")
                     continue
 
-            return products[:5]  # Retorna apenas os 5 primeiros produtos
+            return products[:5]  # Return only first 5 products
 
         except Exception as e:
             logger.error(f"Erro geral ao extrair produtos: {str(e)}")
