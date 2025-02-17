@@ -17,7 +17,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-import MySQLdb.cursors
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -107,67 +106,7 @@ class ProdutoFinder:
     def __init__(self):
         self.driver = None
         self.max_retries = 3
-        self.page_load_timeout = 90  # Aumentado para 60 segundos
-
-    def _initialize_driver(self):
-        chrome_options = Options()
-
-        # Essential configurations
-        chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-
-        # Performance improvements
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-infobars')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-browser-side-navigation')
-        chrome_options.add_argument('--disable-features=NetworkService')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-        chrome_options.add_argument('--force-device-scale-factor=1')
-
-        # Memory optimization
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
-        chrome_options.add_argument('--disable-application-cache')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-logging')
-
-        prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2,
-            'disk-cache-size': 1,
-            'profile.password_manager_enabled': False,
-            'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads'
-        }
-        chrome_options.add_experimental_option('prefs', prefs)
-
-        try:
-            service = Service(
-                executable_path='/usr/local/bin/chromedriver',
-                log_path='/dev/null'
-            )
-
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
-
-            self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.set_script_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(20)  # Aumentado para 20 segundos
-
-            return True
-        except Exception as e:
-            logger.error(f"Driver initialization failed: {str(e)}")
-            if self.driver:
-                self.driver.quit()
-            return False
+        self.page_load_timeout = 40
 
     def _convert_image_to_url(self, image):
         """
@@ -212,6 +151,57 @@ class ProdutoFinder:
             logger.error(f"Erro ao converter imagem: {str(e)}")
             return None
 
+    def _initialize_driver(self):
+        chrome_options = Options()
+
+        # Essential configurations
+        chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+
+        # Memory optimization
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--disk-cache-size=1')
+        chrome_options.add_argument('--media-cache-size=1')
+        chrome_options.add_argument('--disable-application-cache')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-logging')
+
+        # Performance settings
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,
+            'profile.default_content_settings.images': 2,
+            'disk-cache-size': 1,
+            'profile.password_manager_enabled': False,
+            'profile.default_content_settings.popups': 2,
+            'download.prompt_for_download': False,
+            'download.default_directory': '/tmp/downloads'
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
+
+        try:
+            service = Service(
+                executable_path='/usr/local/bin/chromedriver',
+                log_path='/dev/null'  # Disable logging
+            )
+
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
+
+            self.driver.set_page_load_timeout(self.page_load_timeout)
+            self.driver.implicitly_wait(10)
+
+            return True
+        except Exception as e:
+            logger.error(f"Driver initialization failed: {str(e)}")
+            if self.driver:
+                self.driver.quit()
+            return False
+
     def __del__(self):
         self.cleanup()
 
@@ -241,78 +231,58 @@ class ProdutoFinder:
             for attempt in range(self.max_retries):
                 try:
                     self.driver.delete_all_cookies()
+                    self.driver.get(search_url)
+                    time.sleep(5)  # Reduced wait time
 
-                    # Adiciona tratamento de timeout na navegação
-                    try:
-                        self.driver.get(search_url)
-                    except Exception as e:
-                        logger.error(f"Navigation timeout on attempt {attempt + 1}: {str(e)}")
-                        continue
-
-                    # Espera explícita por elementos
-                    time.sleep(10)  # Espera inicial
-
-                    # Tenta extrair produtos com diferentes tempos de espera
-                    for wait_time in [5, 10, 15]:
-                        products = self._extract_products_selenium()
-                        if products:
-                            break
-                        time.sleep(wait_time)
-
+                    products = self._extract_products_selenium()
                     if products:
                         break
 
+                    time.sleep(2)
                 except Exception as e:
                     logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
                     if attempt < self.max_retries - 1:
                         self._initialize_driver()
-                    time.sleep(5)  # Espera entre tentativas
 
-            return products[:5]  # Limita resultados para reduzir uso de memória
+            return products[:5]  # Limit results to reduce memory usage
 
         except Exception as e:
             logger.error(f"Product search failed: {str(e)}")
             return []
         finally:
-            self.cleanup()
+            self.cleanup()  # Ensure cleanup after each search
 
     def _extract_products_selenium(self):
+        """Extrai produtos usando XPath"""
         products = []
         try:
-            # Tenta diferentes estratégias de localização
             xpaths = [
                 "//div[contains(@class, 'isv-r')]",
                 "//div[@class='g' or contains(@class, 'g-card')]",
                 "//div[.//h3 or .//a[@href]]",
                 "//div[contains(@style, 'background-image')]",
-                "//a[.//img]",
-                "//div[contains(@class, 'photo-result')]"  # Adicionado novo seletor
+                "//a[.//img]"
             ]
 
+            result_elements = []
             for xpath in xpaths:
                 try:
-                    elements = WebDriverWait(self.driver, 20).until(
-                        lambda d: d.find_elements(By.XPATH, xpath)
-                    )
+                    elements = self.driver.find_elements(By.XPATH, xpath)
                     if elements:
-                        result_elements = elements
+                        result_elements.extend(elements)
                         break
-                except:
+                except Exception as e:
                     continue
-            else:
-                return []
 
-            result_elements = list(set(result_elements))[:10]
+            result_elements = list(set(result_elements))
 
-            for element in result_elements:
+            for element in result_elements[:10]:
                 try:
-                    # Extração do título com espera explícita
                     title = None
-                    for title_xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a"]:
+                    for xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a",
+                                  ".//span[string-length(text()) > 10]"]:
                         try:
-                            title_element = WebDriverWait(element, 5).until(
-                                lambda d: element.find_element(By.XPATH, title_xpath)
-                            )
+                            title_element = element.find_element(By.XPATH, xpath)
                             title = title_element.text.strip()
                             if title:
                                 break
@@ -322,7 +292,6 @@ class ProdutoFinder:
                     if not title:
                         continue
 
-                    # Resto do código de extração permanece o mesmo
                     link = None
                     try:
                         link_element = element.find_element(By.XPATH, ".//a")
@@ -333,12 +302,34 @@ class ProdutoFinder:
                         except:
                             continue
 
+                    price = None
+                    try:
+                        price_text = element.text
+                        price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
+                        if price_matches:
+                            price_str = price_matches[0]
+                            price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
+                    except:
+                        pass
+
+                    img = None
+                    try:
+                        img_element = element.find_element(By.XPATH, ".//img")
+                        img = img_element.get_attribute('src')
+                    except:
+                        try:
+                            style = element.get_attribute('style')
+                            if style and 'background-image' in style:
+                                img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
+                        except:
+                            pass
+
                     if title and link:
                         product = {
                             "nome": title,
-                            "preco": None,
+                            "preco": price,
                             "link": link,
-                            "imagem": None
+                            "imagem": img
                         }
                         products.append(product)
 
@@ -471,9 +462,7 @@ def upload_produto():
 @login_required
 def lista_cadastros():
     status_filtro = request.args.get('status')
-
-    # Usar DictCursor para retornar resultados como dicionários
-    cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cur = mysql.connection.cursor()
 
     if status_filtro:
         cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
@@ -487,20 +476,17 @@ def lista_cadastros():
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    cur = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
     ficha = cur.fetchone()
     cur.close()
-
-    if not ficha:
-        return "Ficha não encontrada", 404
 
     # Decodifica os links e fotos dos produtos
     ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
     ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
 
     # Cálculo do valor estimado
-    valor_estimado = float(ficha['valor']) if ficha['valor'] is not None else 0.0
+    valor_estimado = float(ficha['valor'])
 
     if ficha['desmontagem'] == 'Sim':
         valor_estimado -= 50.00
@@ -518,11 +504,11 @@ def detalhes_ficha(id):
     ficha['demandaAlta'] = demanda_alta
 
     # Converter o número do bairro para o nome do bairro
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']) if ficha['bairro'] else 0, "Bairro não encontrado")
+    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']), "Bairro não encontrado")
 
     # Converter a data para o formato brasileiro (DD/MM/AAAA)
     if ficha['dtCompra']:
-        data_compra = datetime.strptime(str(ficha['dtCompra']), '%Y-%m-%d')
+        data_compra = datetime.strptime(ficha['dtCompra'], '%Y-%m-%d')
         ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
     else:
         ficha['dtCompra_br'] = "Data não informada"
