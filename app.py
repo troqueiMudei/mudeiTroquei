@@ -462,18 +462,21 @@ def upload_produto():
 @login_required
 def lista_cadastros():
     status_filtro = request.args.get('status')
-    cur = mysql.connection.cursor(dictionary=True)  # Change to dictionary cursor
+    cur = mysql.connection.cursor()
 
     if status_filtro:
         cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
     else:
         cur.execute("SELECT * FROM fichas ORDER BY id DESC")
 
-    fichas = cur.fetchall()
-    cur.close()
+    # Get column names
+    columns = [col[0] for col in cur.description]
 
-    # Process the values to ensure they're in the correct format
-    for ficha in fichas:
+    # Convert tuples to dictionaries
+    fichas = []
+    for row in cur.fetchall():
+        ficha = dict(zip(columns, row))
+
         # Convert decimal values to float for proper template rendering
         if ficha['valor'] is not None:
             ficha['valor'] = float(ficha['valor'])
@@ -482,23 +485,33 @@ def lista_cadastros():
 
         # Handle other decimal fields if needed
         for field in ['altura', 'largura', 'profundidade', 'quantidade']:
-            if ficha[field] is not None:
+            if ficha.get(field) is not None:
                 ficha[field] = float(ficha[field])
             else:
                 ficha[field] = 0.0
 
+        fichas.append(ficha)
+
+    cur.close()
     return render_template('lista.html', fichas=fichas)
 
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    cur = mysql.connection.cursor(dictionary=True)  # Change to dictionary cursor
+    cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
-    ficha = cur.fetchone()
-    cur.close()
 
-    if not ficha:
+    # Get column names
+    columns = [col[0] for col in cur.description]
+
+    # Convert tuple to dictionary
+    row = cur.fetchone()
+    if not row:
+        cur.close()
         return "Ficha não encontrada", 404
+
+    ficha = dict(zip(columns, row))
+    cur.close()
 
     # Decodifica os links e fotos dos produtos
     ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
@@ -523,7 +536,7 @@ def detalhes_ficha(id):
     ficha['demandaAlta'] = demanda_alta
 
     # Converter o número do bairro para o nome do bairro
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']), "Bairro não encontrado")
+    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']) if ficha['bairro'] else 0, "Bairro não encontrado")
 
     # Converter a data para o formato brasileiro (DD/MM/AAAA)
     if ficha['dtCompra']:
