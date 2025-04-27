@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lista de Cadastros</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .card {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: 0.3s;
+            margin-bottom: 20px;
+        }
+        .card:hover {
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        .navbar {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-badge {
+            font-size: 0.85rem;
+        }
+        .status-analise { background-color: #ffc107; }
+        .status-aprovado { background-color: #28a745; }
+        .status-rejeitado { background-color: #dc3545; }
+        .status-pendente { background-color: #17a2b8; }
+        .item-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 4px 4px 0 0;
+        }
+        .item-preview {
+            position: relative;
+        }
+        .filter-bar {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .pagination {
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">Sistema de Cadastros</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('lista_fichas') }}"></a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('logout') }}">Sair</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Conteúdo principal -->
+    <div class="container py-4">
+        <h1 class="mb-4">Lista de Cadastros</h1>
+
+        <!-- Cards de cadastros -->
+        <div class="row">
+            {% for ficha in fichas %}
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="item-preview">
+                        {% if ficha.arquivo %}
+                        <img src="{{ ficha.arquivo_url }}" class="item-image" alt="Imagem do produto">
+                        {% else %}
+                        <div class="item-image bg-light d-flex align-items-center justify-content-center">
+                            <i class="fas fa-image fa-3x text-secondary"></i>
+                        </div>
+                        {% endif %}
+
+                        {% if ficha.status %}
+                        <span class="position-absolute top-0 end-0 m-2 badge
+                            {% if ficha.status == 'Análise' %}status-analise
+                            {% elif ficha.status == 'Aprovado' %}status-aprovado
+                            {% elif ficha.status == 'Rejeitado' %}status-rejeitado
+                            {% else %}status-pendente{% endif %}">
+                            {{ ficha.status }}
+                        </span>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-body">
+                        <h5 class="card-title">{{ ficha.nome }}</h5>
+                        <p class="card-text">
+                            <strong>Descrição:</strong> {{ ficha.descricao|truncate(100) }}
+                        </p>
+                        <p class="card-text">
+                            <strong>Contato:</strong> {{ ficha.telefone }}
+                        </p>
+                        {% if ficha.valor %}
+                        <p class="card-text">
+                            <strong>Valor:</strong> R$ {{ ficha.valor }}
+                        </p>
+                        {% endif %}
+                        <a href="{{ url_for('detalhes_ficha', id=ficha.id) }}" class="btn btn-primary w-100">Ver Detalhes</a>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="col-12">
+                <div class="alert alert-info">
+                    Nenhum cadastro encontrado.
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Paginação -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <nav aria-label="Navegação de página">
+                    <ul class="pagination justify-content-center">
+                        <!-- Botão Anterior -->
+                        {% if pagination.page > 1 %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('lista_fichas', page=pagination.page-1, status=status_filtro) }}" aria-label="Anterior">
+                                <span aria-hidden="true">&laquo;</span>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <a class="page-link" href="#" aria-label="Anterior">
+                                <span aria-hidden="true">&laquo;</span>
+                            </a>
+                        </li>
+                        {% endif %}
+
+                        <!-- Números das Páginas -->
+                        {% for i in range(pagination.start_page, pagination.end_page + 1) %}
+                        <li class="page-item {% if i == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('lista_fichas', page=i, status=status_filtro) }}">{{ i }}</a>
+                        </li>
+                        {% endfor %}
+
+                        <!-- Botão Próximo -->
+                        {% if pagination.page < pagination.total_pages %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('lista_fichas', page=pagination.page+1, status=status_filtro) }}" aria-label="Próximo">
+                                <span aria-hidden="true">&raquo;</span>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <a class="page-link" href="#" aria-label="Próximo">
+                                <span aria-hidden="true">&raquo;</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+
+            <!-- Informações da paginação -->
+            <div class="col-12 text-center mt-2">
+                <p class="text-muted">
+                    Mostrando {{ fichas|length }} de {{ pagination.total_records }} cadastros |
+                    Página {{ pagination.page }} de {{ pagination.total_pages }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

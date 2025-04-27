@@ -2,106 +2,40 @@ import os
 import re
 import time
 import requests
-from flask import Flask, render_template, request, redirect, url_for, session
-from flask_mysqldb import MySQL
-from PIL import Image
 import io
 import base64
 import logging
 import json
 from datetime import datetime
 from functools import wraps
+from PIL import Image
+from flask import Flask, render_template, request, redirect, url_for, session
+import mysql.connector
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import phpserialize
+import math
 
-logging.basicConfig(level=logging.DEBUG)
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
+app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
-# Configuração do MySQL
-app.config['MYSQL_HOST'] = 'viaduct.proxy.rlwy.net'  # Apenas o hostname
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = 'SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji'
-app.config['MYSQL_DB'] = 'railway'
-app.config['MYSQL_PORT'] = 24171  # Porta externa
-
-# Adicionar logs para debug
-logger.info(f"MySQL Host: {app.config['MYSQL_HOST']}")
-logger.info(f"MySQL User: {app.config['MYSQL_USER']}")
-logger.info(f"MySQL Database: {app.config['MYSQL_DB']}")
-logger.info(f"MySQL Port: {app.config['MYSQL_PORT']}")
-
-mysql = MySQL(app)
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-# Mapeamento de bairros
-BAIRROS = {
-    1: "Barra da Tijuca",
-    2: "Recreio dos Bandeirantes",
-    3: "Vargem Grande",
-    4: "Vargem Pequena",
-    5: "Gardênia Azul",
-    6: "Cidade de Deus",
-    7: "Curicica",
-    8: "Taquara",
-    9: "Pechincha",
-    10: "Freguesia (Jacarepaguá)",
-    11: "Camorim",
-    12: "Tanque",
-    13: "Praça Seca",
-    14: "Madureira",
-    16: "Cascadura",
-    17: "Campinho",
-    18: "Méier",
-    19: "Engenho de Dentro",
-    20: "Vila Isabel",
-    21: "Tijuca",
-    22: "Maracanã",
-    23: "São Cristóvão",
-    24: "Centro",
-    25: "Flamengo",
-    26: "Botafogo",
-    27: "Copacabana",
-    28: "Ipanema",
-    29: "Leblon",
-    30: "Jardim Botânico",
-    31: "Laranjeiras",
-    32: "Cosme Velho",
-    33: "Glória",
-    34: "Santa Teresa",
-    35: "Lapa",
-    36: "Penha",
-    37: "Olaria",
-    38: "Ramos",
-    39: "Bonsucesso",
-    40: "Ilha do Governador",
-    41: "Pavuna",
-    42: "Anchieta",
-    43: "Guadalupe",
-    44: "Deodoro",
-    45: "Realengo",
-    46: "Bangu",
-    47: "Campo Grande",
-    48: "Santa Cruz",
-    49: "Sepetiba",
-    50: "Guaratiba",
-    51: "Pedra de Guaratiba",
-    52: "Grajaú",
-    53: "Engenho Novo",
-    54: "Rocha Miranda",
-    55: "Higienópolis"
+# Configuração da conexão com o banco de dados MySQL
+DB_CONFIG = {
+    'host': '162.241.62.121',
+    'port': 3306,
+    'user': 'mudeit26_teste',
+    'password': 'teste2025@',
+    'database': 'mudeit26_site'
 }
 
 
-# Classe para buscar produtos por imagem
+# Classe para buscar produtos por imagem no Google Lens
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
@@ -160,6 +94,19 @@ class ProdutoFinder:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
 
+        # Anti-bot detection
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # User agent mais realista
+        chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36')
+
+        # Outras configurações
+        chrome_options.add_argument('--lang=pt-BR')
+        chrome_options.add_argument('--window-size=1920,1080')
+
         # Memory optimization
         chrome_options.add_argument('--memory-pressure-off')
         chrome_options.add_argument('--disk-cache-size=1')
@@ -192,6 +139,15 @@ class ProdutoFinder:
                 options=chrome_options
             )
 
+            # Adicionar JavaScript para ocultar automação
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    })
+                '''
+            })
+
             self.driver.set_page_load_timeout(self.page_load_timeout)
             self.driver.implicitly_wait(10)
 
@@ -219,35 +175,67 @@ class ProdutoFinder:
     def buscar_produtos(self, imagem):
         try:
             if not self.driver and not self._initialize_driver():
+                logger.error("Falha ao inicializar o driver")
                 return []
 
             img_url = self._convert_image_to_url(imagem)
             if not img_url:
+                logger.error("Falha ao converter imagem para URL")
                 return []
 
+            # URL direta para o Google Lens com a imagem
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
             products = []
+
+            logger.info(f"Buscando no Google Lens: {search_url}")
 
             for attempt in range(self.max_retries):
                 try:
                     self.driver.delete_all_cookies()
                     self.driver.get(search_url)
-                    time.sleep(5)  # Reduced wait time
+
+                    # Tempo de espera maior para carregamento da página
+                    logger.info("Aguardando carregamento da página...")
+                    time.sleep(10)  # Aumentado para 10 segundos
+
+                    # Verificar se a página foi carregada corretamente
+                    page_source = self.driver.page_source
+                    if "Google Lens" not in page_source:
+                        logger.warning(f"Página do Google Lens não carregou corretamente (tentativa {attempt + 1})")
+                        if attempt < self.max_retries - 1:
+                            self._initialize_driver()
+                            continue
+
+                    # Tentar localizar o botão "Shopping" e clicar nele, se existir
+                    try:
+                        shopping_tab = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Shopping')]")
+                        shopping_tab.click()
+                        time.sleep(5)  # Esperar o carregamento após clicar
+                        logger.info("Clicou na aba Shopping")
+                    except Exception as e:
+                        logger.warning(f"Não foi possível encontrar a aba Shopping: {str(e)}")
+
+                    # Salvar screenshot para debug
+                    self.driver.save_screenshot(f'/tmp/lens_attempt_{attempt}.png')
+                    logger.info(f"Screenshot salvo em /tmp/lens_attempt_{attempt}.png")
 
                     products = self._extract_products_selenium()
                     if products:
+                        logger.info(f"Encontrados {len(products)} produtos")
                         break
+                    else:
+                        logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}")
 
                     time.sleep(2)
                 except Exception as e:
-                    logger.error(f"Search attempt {attempt + 1} failed: {str(e)}")
+                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
                     if attempt < self.max_retries - 1:
                         self._initialize_driver()
 
             return products[:5]  # Limit results to reduce memory usage
 
         except Exception as e:
-            logger.error(f"Product search failed: {str(e)}")
+            logger.error(f"Busca de produtos falhou: {str(e)}")
             return []
         finally:
             self.cleanup()  # Ensure cleanup after each search
@@ -256,73 +244,45 @@ class ProdutoFinder:
         """Extrai produtos usando XPath"""
         products = []
         try:
-            xpaths = [
-                "//div[contains(@class, 'isv-r')]",
-                "//div[@class='g' or contains(@class, 'g-card')]",
-                "//div[.//h3 or .//a[@href]]",
-                "//div[contains(@style, 'background-image')]",
-                "//a[.//img]"
-            ]
+            # Ajuste para aguardar o carregamento dos resultados (usando WebDriverWait)
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
 
-            result_elements = []
-            for xpath in xpaths:
+            # Esperar elementos de produtos carregarem
+            wait = WebDriverWait(self.driver, 15)
+
+            # Xpaths atualizados para o Google Lens (verifique a estrutura atual)
+            product_containers = wait.until(EC.presence_of_all_elements_located(
+                (By.XPATH, "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]")
+            ))
+
+            logger.info(f"Encontrados {len(product_containers)} produtos potenciais")
+
+            for container in product_containers[:10]:
                 try:
-                    elements = self.driver.find_elements(By.XPATH, xpath)
-                    if elements:
-                        result_elements.extend(elements)
-                        break
-                except Exception as e:
-                    continue
+                    # Extrair título
+                    title_element = container.find_element(By.XPATH, ".//div[contains(@class, 'AJB7ye')]")
+                    title = title_element.text.strip() if title_element else None
 
-            result_elements = list(set(result_elements))
+                    # Extrair link
+                    link_element = container.find_element(By.XPATH, ".//a")
+                    link = link_element.get_attribute('href') if link_element else None
 
-            for element in result_elements[:10]:
-                try:
-                    title = None
-                    for xpath in [".//h3", ".//div[contains(@class, 'title')]", ".//a",
-                                  ".//span[string-length(text()) > 10]"]:
-                        try:
-                            title_element = element.find_element(By.XPATH, xpath)
-                            title = title_element.text.strip()
-                            if title:
-                                break
-                        except:
-                            continue
-
-                    if not title:
-                        continue
-
-                    link = None
-                    try:
-                        link_element = element.find_element(By.XPATH, ".//a")
-                        link = link_element.get_attribute('href')
-                    except:
-                        try:
-                            link = element.get_attribute('href')
-                        except:
-                            continue
-
+                    # Extrair preço
+                    price_element = container.find_element(By.XPATH, ".//span[contains(@class, 'e10twf')]")
+                    price_text = price_element.text.strip() if price_element else None
                     price = None
-                    try:
-                        price_text = element.text
+
+                    if price_text:
+                        # Extrair números do preço
                         price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
                         if price_matches:
                             price_str = price_matches[0]
                             price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
-                    except:
-                        pass
 
-                    img = None
-                    try:
-                        img_element = element.find_element(By.XPATH, ".//img")
-                        img = img_element.get_attribute('src')
-                    except:
-                        try:
-                            style = element.get_attribute('style')
-                            if style and 'background-image' in style:
-                                img = re.findall(r'url\(["\']?(.*?)["\']?\)', style)[0]
-                        except:
-                            pass
+                    # Extrair imagem
+                    img_element = container.find_element(By.XPATH, ".//img")
+                    img = img_element.get_attribute('src') if img_element else None
 
                     if title and link:
                         product = {
@@ -332,15 +292,37 @@ class ProdutoFinder:
                             "imagem": img
                         }
                         products.append(product)
+                        logger.info(f"Produto encontrado: {title}")
 
                 except Exception as e:
+                    logger.error(f"Erro ao extrair dados do produto: {str(e)}")
                     continue
 
             return products
 
         except Exception as e:
             logger.error(f"Erro ao extrair produtos: {str(e)}")
+            # Salvar screenshot para debug
+            try:
+                self.driver.save_screenshot('/tmp/lens_error.png')
+                logger.info("Screenshot salvo em /tmp/lens_error.png")
+            except:
+                pass
             return []
+
+
+# Instância do ProdutoFinder
+finder = ProdutoFinder()
+
+
+# Função para obter uma conexão com o banco de dados
+def get_db_connection():
+    try:
+        connection = mysql.connector.connect(**DB_CONFIG)
+        return connection
+    except Exception as e:
+        logger.error(f"Erro ao conectar ao banco de dados: {str(e)}")
+        return None
 
 
 # Decorator para verificar se o usuário está logado
@@ -350,6 +332,7 @@ def login_required(f):
         if not session.get('logged_in'):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
+
     return decorated_function
 
 
@@ -362,15 +345,11 @@ def login():
         # Validação simples (substitua por uma lógica de autenticação real)
         if username == 'admin' and password == 'admin123':
             session['logged_in'] = True  # Define a sessão como logada
-            return redirect(url_for('lista_cadastros'))
+            return redirect(url_for('lista_fichas'))
         else:
             return "Usuário ou senha inválidos", 401
 
     return render_template('login.html')
-
-
-# Instância do ProdutoFinder
-finder = ProdutoFinder()
 
 
 @app.route('/logout')
@@ -379,277 +358,277 @@ def logout():
     return redirect(url_for('login'))
 
 
-@app.route('/', methods=['GET', 'POST'])
-def upload_produto():
-    if request.method == 'POST':
-        logger.info("Recebida requisição POST")
+@app.route('/')
+@login_required
+def lista_fichas():
+    """Página principal que lista todas as fichas com paginação"""
+    status_filtro = request.args.get('status')
 
-        # Coleta dos dados do formulário
-        form_data = {
-            'nome': request.form['nome'],
-            'cpf': request.form['cpf'],
-            'telefone': request.form['telefone'],
-            'email': request.form['email'],
-            'produto': request.form['produto'],
-            'marca': request.form['marca'],
-            'dtCompra': request.form['data_compra'],
-            'valor': float(request.form['valor_unitario']) if request.form['valor_unitario'] else 0.0,
-            'marcaUso': request.form['marcas_uso'],
-            'descricao': request.form['descricao'],
-            'altura': float(request.form['altura']) if request.form['altura'] else 0.0,
-            'largura': float(request.form['largura']) if request.form['largura'] else 0.0,
-            'profundidade': float(request.form['profundidade']) if request.form['profundidade'] else 0.0,
-            'quantidade': float(request.form['quantidade']) if request.form['quantidade'] else 0.0,
-            'outroBairro': request.form.get('outro_bairro', ''),
-            'voltagem': request.form['voltagem'],
-            'tipoEstado': request.form['tipo_reparo'],
-            'bairro': request.form['bairro'],
-            'novo': 1 if 'novo' in request.form.getlist('estado[]') else 0,
-            'usado': 1 if 'usado' in request.form.getlist('estado[]') else 0,
-            'troca': request.form['aceita_credito'],
-            'nf': request.form['possui_nota_fiscal'],
-            'sujo': request.form['precisa_limpeza'],
-            'mofo': 1 if 'possui_mofo' in request.form.getlist('estado[]') else 0,
-            'cupim': 1 if 'possui_cupim' in request.form.getlist('estado[]') else 0,
-            'trincado': 1 if 'esta_trincado' in request.form.getlist('estado[]') else 0,
-            'desmontagem': request.form['precisa_desmontagem'],
-            'status': 'Análise',  # Status padrão
-            'urgente': 'não',
+    # Parâmetros de paginação
+    page = request.args.get('page', 1, type=int)  # Página atual (padrão: 1)
+    per_page = 15  # Itens por página
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
+
+        cursor = conn.cursor(dictionary=True)
+
+        # Consulta para contar o total de registros (para paginação)
+        count_sql = """
+        SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta
+        """
+
+        if status_filtro:
+            count_sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
+            cursor.execute(count_sql, (status_filtro,))
+        else:
+            cursor.execute(count_sql)
+
+        total_records = cursor.fetchone()['total']
+        total_pages = math.ceil(total_records / per_page)
+
+        # Cálculo do offset para paginação
+        offset = (page - 1) * per_page
+
+        # Consulta SQL para listar as fichas com paginação
+        sql = """
+        SELECT
+            entry_id AS id,
+            MAX(CASE WHEN meta_key = 'name-1' THEN meta_value END) AS nome,
+            MAX(CASE WHEN meta_key = 'phone-1' THEN meta_value END) AS telefone,
+            MAX(CASE WHEN meta_key = 'email-1' THEN meta_value END) AS email,
+            MAX(CASE WHEN meta_key = 'text-1' THEN meta_value END) AS descricao,
+            MAX(CASE WHEN meta_key = 'text-3' THEN meta_value END) AS localCompra,
+            MAX(CASE WHEN meta_key = 'text-4' THEN meta_value END) AS dataDeCompra,
+            MAX(CASE WHEN meta_key = 'currency-1' THEN meta_value END) AS valor,
+            MAX(CASE WHEN meta_key = 'radio-2' THEN meta_value END) AS possuiNota,
+            MAX(CASE WHEN meta_key = 'radio-3' THEN meta_value END) AS status,
+            MAX(CASE WHEN meta_key = 'text-2' THEN meta_value END) AS marcaUso,
+            MAX(CASE WHEN meta_key = 'textarea-1' THEN meta_value END) AS descricaoItem,
+            MAX(CASE WHEN meta_key = 'number-1' THEN meta_value END) AS altura,
+            MAX(CASE WHEN meta_key = 'number-2' THEN meta_value END) AS largura,
+            MAX(CASE WHEN meta_key = 'number-3' THEN meta_value END) AS profundidade,
+            MAX(CASE WHEN meta_key = 'radio-1' THEN meta_value END) AS troca,
+            MAX(CASE WHEN meta_key = 'text-5' THEN meta_value END) AS text5,
+            MAX(CASE WHEN meta_key = 'upload-1' THEN meta_value END) AS arquivo
+        FROM frmt_form_entry_meta
+        """
+
+        if status_filtro:
+            sql += " HAVING status = %s"
+            sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
+            cursor.execute(sql, (status_filtro, per_page, offset))
+        else:
+            sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
+            cursor.execute(sql, (per_page, offset))
+
+        fichas = cursor.fetchall()
+
+        for ficha in fichas:
+            if ficha['arquivo']:
+                try:
+                    dados_serializados = ficha['arquivo'].encode('utf-8')
+                    dados = phpserialize.loads(dados_serializados, decode_strings=True)
+                    ficha['arquivo_url'] = dados['file']['file_url'][0]
+                except Exception as e:
+                    print(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
+                    ficha['arquivo_url'] = None
+            else:
+                ficha['arquivo_url'] = None
+
+        cursor.close()
+        conn.close()
+
+        # Calcular os valores para paginação
+        start_page = page - 2 if page > 2 else 1
+        end_page = start_page + 4
+        if end_page > total_pages:
+            end_page = total_pages
+            start_page = end_page - 4 if end_page > 4 else 1
+
+        # Passando dados de paginação para o template
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages,
+            'total_records': total_records,
+            'start_page': start_page,
+            'end_page': end_page
         }
 
-        # Processamento da imagem
-        if 'imagem' in request.files:
-            imagem = request.files['imagem']
-            img = Image.open(imagem)
-            img_buffer = io.BytesIO()
-            img.save(img_buffer, format='JPEG')
-            img_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-            form_data['foto1'] = img_str
+        return render_template('lista_fichas.html', fichas=fichas, pagination=pagination, status_filtro=status_filtro)
 
-            # Busca de produtos usando a imagem
-            produtos_encontrados = finder.buscar_produtos(img)
-            links_produto = json.dumps([{"link": p['link'], "valor": p['preco'], "imagem": p['imagem']} for p in produtos_encontrados])
-            fotos_produto = json.dumps([p['imagem'] for p in produtos_encontrados])
-
-            form_data['linksProduto'] = links_produto
-            form_data['fotosProduto'] = fotos_produto
-
-        # Inserção no banco de dados
-        cur = mysql.connection.cursor()
-        cur.execute("""
-            INSERT INTO fichas (
-                nome, cpf, telefone, email, produto, desmontagem, marca, dtCompra, valor, valorEstimado,
-                marcaUso, descricao, altura, largura, profundidade, foto1, status, urgente, quantidade,
-                outroBairro, voltagem, bairro, tipoEstado, novo, usado, troca, nf, sujo, mofo, cupim,
-                trincado, linksProduto, fotosProduto
-            ) VALUES (
-                %(nome)s, %(cpf)s, %(telefone)s, %(email)s, %(produto)s, %(desmontagem)s, %(marca)s,
-                %(dtCompra)s, %(valor)s, %(valor)s, %(marcaUso)s, %(descricao)s, %(altura)s, %(largura)s,
-                %(profundidade)s, %(foto1)s, %(status)s, %(urgente)s, %(quantidade)s, %(outroBairro)s,
-                %(voltagem)s, %(bairro)s, %(tipoEstado)s, %(novo)s, %(usado)s, %(troca)s, %(nf)s, %(sujo)s,
-                %(mofo)s, %(cupim)s, %(trincado)s, %(linksProduto)s, %(fotosProduto)s
-            )
-        """, form_data)
-        mysql.connection.commit()
-        cur.close()
-
-        return render_template('upload.html')
-
-    return render_template('upload.html')
-
-
-@app.route('/lista')
-@login_required
-def lista_cadastros():
-    status_filtro = request.args.get('status')
-    cur = mysql.connection.cursor()
-
-    if status_filtro:
-        cur.execute("SELECT * FROM fichas WHERE status = %s ORDER BY id DESC", (status_filtro,))
-    else:
-        cur.execute("SELECT * FROM fichas ORDER BY id DESC")
-
-    # Get column names
-    columns = [col[0] for col in cur.description]
-
-    # Convert tuples to dictionaries
-    fichas = []
-    for row in cur.fetchall():
-        ficha = dict(zip(columns, row))
-
-        # Convert decimal values to float for proper template rendering
-        if ficha['valor'] is not None:
-            ficha['valor'] = float(ficha['valor'])
-        else:
-            ficha['valor'] = 0.0
-
-        # Handle other decimal fields if needed
-        for field in ['altura', 'largura', 'profundidade', 'quantidade']:
-            if ficha.get(field) is not None:
-                ficha[field] = float(ficha[field])
-            else:
-                ficha[field] = 0.0
-
-        fichas.append(ficha)
-
-    cur.close()
-    return render_template('lista.html', fichas=fichas)
+    except Exception as e:
+        logger.error(f"Erro ao listar fichas: {str(e)}")
+        return f"Erro ao processar a solicitação: {str(e)}", 500
 
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM fichas WHERE id = %s", (id,))
+    """Página de detalhes de uma ficha específica"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
 
-    # Get column names
-    columns = [col[0] for col in cur.description]
+        cursor = conn.cursor(dictionary=True)
 
-    # Convert tuple to dictionary
-    row = cur.fetchone()
-    if not row:
-        cur.close()
-        return "Ficha não encontrada", 404
+        # Consulta SQL para obter detalhes de uma ficha específica
+        sql = """
+        SELECT
+            entry_id AS id,
+            MAX(CASE WHEN meta_key = 'name-1' THEN meta_value END) AS nome,
+            MAX(CASE WHEN meta_key = 'phone-1' THEN meta_value END) AS telefone,
+            MAX(CASE WHEN meta_key = 'email-1' THEN meta_value END) AS email,
+            MAX(CASE WHEN meta_key = 'text-1' THEN meta_value END) AS descricao,
+            MAX(CASE WHEN meta_key = 'text-3' THEN meta_value END) AS localCompra,
+            MAX(CASE WHEN meta_key = 'text-4' THEN meta_value END) AS dataDeCompra,
+            MAX(CASE WHEN meta_key = 'currency-1' THEN meta_value END) AS valor,
+            MAX(CASE WHEN meta_key = 'radio-2' THEN meta_value END) AS possuiNota,
+            MAX(CASE WHEN meta_key = 'radio-3' THEN meta_value END) AS status,
+            MAX(CASE WHEN meta_key = 'text-2' THEN meta_value END) AS marcaUso,
+            MAX(CASE WHEN meta_key = 'textarea-1' THEN meta_value END) AS descricaoItem,
+            MAX(CASE WHEN meta_key = 'number-1' THEN meta_value END) AS altura,
+            MAX(CASE WHEN meta_key = 'number-2' THEN meta_value END) AS largura,
+            MAX(CASE WHEN meta_key = 'number-3' THEN meta_value END) AS profundidade,
+            MAX(CASE WHEN meta_key = 'radio-1' THEN meta_value END) AS troca,
+            MAX(CASE WHEN meta_key = 'text-5' THEN meta_value END) AS text5,
+            MAX(CASE WHEN meta_key = 'upload-1' THEN meta_value END) AS arquivo
+        FROM frmt_form_entry_meta
+        WHERE entry_id = %s
+        GROUP BY entry_id
+        """
 
-    ficha = dict(zip(columns, row))
-    cur.close()
+        cursor.execute(sql, (id,))
+        ficha = cursor.fetchone()
 
-    # Decodifica os links e fotos dos produtos
-    ficha['linksProduto'] = json.loads(ficha['linksProduto']) if ficha['linksProduto'] else []
-    ficha['fotosProduto'] = json.loads(ficha['fotosProduto']) if ficha['fotosProduto'] else []
+        dados_serializados = ficha['arquivo'].encode('utf-8')
+        dados = phpserialize.loads(dados_serializados, decode_strings=True)
+        ficha['arquivo_url'] = dados['file']['file_url'][0]
 
-    # Ensure valor is a float
-    valor_estimado = float(ficha['valor']) if ficha['valor'] is not None else 0.0
+        cursor.close()
 
-    if ficha['desmontagem'] == 'Sim':
-        valor_estimado -= 50.00
+        if not ficha:
+            conn.close()
+            return "Ficha não encontrada", 404
 
-    if ficha['sujo'] == 'Sim':
-        valor_estimado -= 30.00
+        # Buscar produtos similares usando a imagem (se disponível)
+        produtos_similares = []
+        if ficha.get('arquivo_url'):
+            try:
+                arquivo_path = ficha['arquivo_url']
+                # Se for uma URL, baixa a imagem
+                if arquivo_path.startswith(('http://', 'https://')):
+                    response = requests.get(arquivo_path)
+                    if response.status_code == 200:
+                        img = Image.open(io.BytesIO(response.content))
+                        # Busca produtos similares usando a imagem
+                        produtos_similares = finder.buscar_produtos(img)
+                # Se for um caminho local
+                else:
+                    if os.path.exists(arquivo_path):
+                        img = Image.open(arquivo_path)
+                        produtos_similares = finder.buscar_produtos(img)
+            except Exception as e:
+                logger.error(f"Erro ao buscar produtos similares: {str(e)}")
 
-    # Cálculo da demanda média e alta
-    demanda_media = valor_estimado + (valor_estimado * 0.05)
-    demanda_alta = valor_estimado + (valor_estimado * 0.10)
+        conn.close()
 
-    # Adiciona os valores calculados à ficha
-    ficha['valorEstimado'] = valor_estimado
-    ficha['demandaMedia'] = demanda_media
-    ficha['demandaAlta'] = demanda_alta
+        # Cálculo do valor estimado e outras informações
+        valor_estimado = float(ficha['valor']) if ficha.get('valor') else 0.0
 
-    # Converter o número do bairro para o nome do bairro
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha['bairro']) if ficha['bairro'] else 0, "Bairro não encontrado")
+        # Cálculo da demanda média e alta
+        demanda_media = valor_estimado + (valor_estimado * 0.05)
+        demanda_alta = valor_estimado + (valor_estimado * 0.10)
 
-    # Converter a data para o formato brasileiro (DD/MM/AAAA)
-    if ficha['dtCompra']:
-        data_compra = datetime.strptime(str(ficha['dtCompra']), '%Y-%m-%d')
-        ficha['dtCompra_br'] = data_compra.strftime('%d/%m/%Y')
-    else:
-        ficha['dtCompra_br'] = "Data não informada"
+        # Adiciona os valores calculados à ficha
+        ficha['valorEstimado'] = valor_estimado
+        ficha['demandaMedia'] = demanda_media
+        ficha['demandaAlta'] = demanda_alta
+        ficha['produtos_similares'] = produtos_similares
 
-    return render_template('detalhes.html', ficha=ficha)
+        return render_template('detalhes_ficha.html', ficha=ficha)
 
-@app.route('/atualizar_status/  <int:id>', methods=['POST'])
+    except Exception as e:
+        logger.error(f"Erro ao exibir detalhes da ficha: {str(e)}")
+        return f"Erro ao processar a solicitação: {str(e)}", 500
+
+
+@app.route('/atualizar_status/<int:id>', methods=['POST'])
 @login_required
 def atualizar_status(id):
+    """Rota para atualizar o status de uma ficha"""
     novo_status = request.form['status']
-    cur = mysql.connection.cursor()
-    cur.execute("UPDATE fichas SET status = %s WHERE id = %s", (novo_status, id))
-    mysql.connection.commit()
-    cur.close()
-    return redirect(url_for('detalhes_ficha', id=id))
 
-
-def create_tables():
     try:
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
 
-        # Criar tabela fichas se não existir
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS fichas (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            nome VARCHAR(255),
-            cpf VARCHAR(14),
-            telefone VARCHAR(20),
-            email VARCHAR(255),
-            produto VARCHAR(255),
-            desmontagem VARCHAR(3),
-            marca VARCHAR(255),
-            dtCompra DATE,
-            valor DECIMAL(10,2),
-            valorEstimado DECIMAL(10,2),
-            marcaUso VARCHAR(255),
-            descricao TEXT,
-            altura DECIMAL(10,2),
-            largura DECIMAL(10,2),
-            profundidade DECIMAL(10,2),
-            foto1 LONGTEXT,
-            status VARCHAR(50),
-            urgente VARCHAR(3),
-            quantidade DECIMAL(10,2),
-            outroBairro VARCHAR(255),
-            voltagem VARCHAR(50),
-            bairro VARCHAR(50),
-            tipoEstado VARCHAR(50),
-            novo TINYINT(1),
-            usado TINYINT(1),
-            troca VARCHAR(3),
-            nf VARCHAR(3),
-            sujo VARCHAR(3),
-            mofo TINYINT(1),
-            cupim TINYINT(1),
-            trincado TINYINT(1),
-            linksProduto TEXT,
-            fotosProduto TEXT
-        )
-        """)
+        cursor = conn.cursor()
 
-        mysql.connection.commit()
-        logger.info("Tabelas criadas/verificadas com sucesso")
+        # Atualizar o status na tabela
+        sql = """
+        UPDATE frmt_form_entry_meta
+        SET meta_value = %s
+        WHERE entry_id = %s AND meta_key = 'radio-3'
+        """
+
+        cursor.execute(sql, (novo_status, id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return redirect(url_for('detalhes_ficha', id=id))
+
     except Exception as e:
-        logger.error(f"Erro ao criar tabelas: {str(e)}")
-    finally:
-        if 'cur' in locals():
-            cur.close()
-
-
-def check_chrome_version():
-    try:
-        chrome_version = os.popen('google-chrome --version').read().strip()
-        logger.info(f"Chrome version: {chrome_version}")
-        chromedriver_version = os.popen('chromedriver --version').read().strip()
-        logger.info(f"ChromeDriver version: {chromedriver_version}")
-    except Exception as e:
-        logger.error(f"Error checking versions: {str(e)}")
+        logger.error(f"Erro ao atualizar status: {str(e)}")
+        return f"Erro ao processar a solicitação: {str(e)}", 500
 
 
 @app.route('/test-db')
 def test_db():
+    """Rota para testar a conexão com o banco de dados"""
     try:
-        cur = mysql.connection.cursor()
-        cur.execute('SELECT 1')
-        result = cur.fetchone()
-        cur.close()
-        return {
-            'status': 'success',
-            'message': 'Conexão com banco de dados estabelecida',
-            'config': {
-                'host': app.config['MYSQL_HOST'],
-                'port': app.config['MYSQL_PORT'],
-                'database': app.config['MYSQL_DB']
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return {
+                'status': 'success',
+                'message': 'Conexão com banco de dados estabelecida',
+                'config': {
+                    'host': DB_CONFIG['host'],
+                    'port': DB_CONFIG['port'],
+                    'database': DB_CONFIG['database']
+                }
             }
-        }
+        else:
+            return {
+                'status': 'error',
+                'message': 'Não foi possível estabelecer conexão com o banco de dados',
+                'config': {
+                    'host': DB_CONFIG['host'],
+                    'port': DB_CONFIG['port'],
+                    'database': DB_CONFIG['database']
+                }
+            }
     except Exception as e:
         return {
             'status': 'error',
             'message': str(e),
             'config': {
-                'host': app.config['MYSQL_HOST'],
-                'port': app.config['MYSQL_PORT'],
-                'database': app.config['MYSQL_DB']
+                'host': DB_CONFIG['host'],
+                'port': DB_CONFIG['port'],
+                'database': DB_CONFIG['database']
             }
         }
 
 
 if __name__ == '__main__':
-    with app.app_context():
-        create_tables()
     app.run(debug=True)
