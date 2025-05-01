@@ -25,10 +25,17 @@
             border-radius: 5px;
             padding: 15px;
             margin-bottom: 15px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .produto-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
         }
         .produto-item img {
             max-height: 100px;
             object-fit: contain;
+            display: block;
+            margin: 0 auto;
         }
         .dimensoes-box {
             display: inline-block;
@@ -47,6 +54,56 @@
         .valor-estimado { background-color: #d1e7dd; }
         .valor-media { background-color: #fff3cd; }
         .valor-alta { background-color: #f8d7da; }
+        .produtos-similares-container {
+            max-height: 500px;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+        .produtos-similares-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .produtos-similares-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .produtos-similares-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        .produto-nome {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            font-size: 0.9rem;
+        }
+        .loading-spinner {
+            display: none;
+            margin: 20px auto;
+            text-align: center;
+        }
+        .refresh-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+        .card-title-with-action {
+            position: relative;
+            padding-right: 40px;
+        }
+        .atualizar-status-form {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        @media (max-width: 767.98px) {
+            .valor-box {
+                margin-right: 0;
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -132,16 +189,17 @@
                     </div>
                 </div>
 
+                <!-- Formulário para atualizar status -->
                 <div class="card">
                     <div class="card-header">
                         <h3>Atualizar Status</h3>
                     </div>
                     <div class="card-body">
-                        <form action="{{ url_for('atualizar_status', id=ficha.id) }}" method="POST">
+                        <form action="{{ url_for('atualizar_status', id=ficha.id) }}" method="POST" class="atualizar-status-form">
                             <div class="mb-3">
-                                <label for="status" class="form-label">Novo Status:</label>
+                                <label for="status" class="form-label"><strong>Status do Item:</strong></label>
                                 <select name="status" id="status" class="form-select">
-                                    <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Análise</option>
+                                    <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Em Análise</option>
                                     <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
                                     <option value="Reprovado" {% if ficha.status == 'Reprovado' %}selected{% endif %}>Reprovado</option>
                                     <option value="Pendente" {% if ficha.status == 'Pendente' %}selected{% endif %}>Pendente</option>
@@ -159,7 +217,7 @@
                         <h3>Foto do Produto</h3>
                     </div>
                     <div class="card-body text-center">
-                        {% if ficha.arquivo %}
+                        {% if ficha.arquivo_url %}
                         <img src="{{ ficha.arquivo_url }}" alt="Foto do produto" class="img-fluid mb-3" style="max-height: 300px;">
                         <a href="{{ ficha.arquivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver imagem em tamanho original</a>
                         {% else %}
@@ -171,40 +229,59 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header card-title-with-action">
                         <h3>Produtos Similares</h3>
+                        {% if ficha.arquivo_url %}
+                        <button id="refreshSimilares" class="btn btn-sm btn-outline-primary refresh-btn"
+                                title="Buscar novamente produtos similares">
+                            <i class="bi bi-arrow-clockwise"></i> Atualizar
+                        </button>
+                        {% endif %}
                     </div>
                     <div class="card-body">
-                        {% if ficha.produtos_similares %}
-                            {% for produto in ficha.produtos_similares %}
-                            <div class="produto-item">
-                                <div class="row">
-                                    <div class="col-4">
-                                        {% if produto.imagem %}
-                                        <img src="{{ produto.imagem }}" alt="{{ produto.nome }}" class="img-fluid">
-                                        {% else %}
-                                        <div class="text-center p-3 bg-light">
-                                            <small>Sem imagem</small>
+                        <div id="loadingSpinner" class="loading-spinner">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Carregando...</span>
+                            </div>
+                            <p class="mt-2">Buscando produtos similares...</p>
+                        </div>
+
+                        <div id="produtosSimilaresContainer" class="produtos-similares-container">
+                            {% if ficha.produtos_similares %}
+                                {% for produto in ficha.produtos_similares %}
+                                <div class="produto-item">
+                                    <div class="row">
+                                        <div class="col-4">
+                                            {% if produto.imagem %}
+                                            <img src="{{ produto.imagem }}" alt="{{ produto.nome }}" class="img-fluid">
+                                            {% else %}
+                                            <div class="text-center p-3 bg-light">
+                                                <small>Sem imagem</small>
+                                            </div>
+                                            {% endif %}
                                         </div>
-                                        {% endif %}
-                                    </div>
-                                    <div class="col-8">
-                                        <p class="mb-1"><strong>{{ produto.nome }}</strong></p>
-                                        {% if produto.preco %}
-                                        <p class="mb-1 text-success">R$ {{ "%.2f"|format(produto.preco) }}</p>
-                                        {% else %}
-                                        <p class="mb-1 text-muted">Preço não disponível</p>
-                                        {% endif %}
-                                        <a href="{{ produto.link }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver produto</a>
+                                        <div class="col-8">
+                                            <p class="mb-1 produto-nome"><strong>{{ produto.nome }}</strong></p>
+                                            {% if produto.preco %}
+                                            <p class="mb-1 text-success fw-bold">R$ {{ "%.2f"|format(produto.preco) }}</p>
+                                            {% else %}
+                                            <p class="mb-1 text-muted">Preço não disponível</p>
+                                            {% endif %}
+                                            <a href="{{ produto.link }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver produto</a>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="alert alert-info">
-                                Nenhum produto similar encontrado.
-                            </div>
-                        {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                <div id="semProdutos" class="alert alert-info">
+                                    {% if ficha.arquivo_url %}
+                                        Nenhum produto similar encontrado. Clique em "Atualizar" para tentar novamente.
+                                    {% else %}
+                                        Nenhuma imagem disponível para buscar produtos similares.
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -212,5 +289,29 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const refreshBtn = document.getElementById('refreshSimilares');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', function() {
+                    // Mostrar spinner
+                    document.getElementById('loadingSpinner').style.display = 'block';
+                    document.getElementById('produtosSimilaresContainer').style.display = 'none';
+
+                    // Recarregar a página para buscar novos produtos similares
+                    location.reload();
+                });
+            }
+
+            // Para abrir links de produtos em nova aba
+            const produtoLinks = document.querySelectorAll('.produto-item a');
+            produtoLinks.forEach(link => {
+                link.setAttribute('target', '_blank');
+                link.setAttribute('rel', 'noopener noreferrer');
+            });
+        });
+    </script>
 </body>
 </html>

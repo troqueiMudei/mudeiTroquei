@@ -41,23 +41,65 @@ class ProdutoFinder:
         self.driver = None
         self.max_retries = 3
         self.page_load_timeout = 40
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
+        ]
 
-    def _convert_image_to_url(self, image):
+    def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
         """
         Converte uma imagem para URL usando o serviço imgbb
+        Aceita PIL.Image, URL ou dados binários da imagem
         """
         try:
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            if image is not None:
+                # Se recebemos uma imagem PIL
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
 
-            img_buffer = io.BytesIO()
-            image.save(img_buffer, format='JPEG', quality=95)
-            img_buffer.seek(0)
+                # Reduzir o tamanho da imagem para melhorar o desempenho
+                max_size = (800, 800)
+                image.thumbnail(max_size, Image.LANCZOS)
 
+                img_buffer = io.BytesIO()
+                image.save(img_buffer, format='JPEG', quality=85)
+                img_buffer.seek(0)
+                files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+
+            elif image_data is not None:
+                # Se recebemos dados binários da imagem
+                files = {'image': ('image.jpg', image_data, 'image/jpeg')}
+
+            elif image_url is not None:
+                # Se recebemos uma URL
+                try:
+                    # Tenta baixar a imagem da URL com headers adequados
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+                        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                        'Referer': 'https://mude.ind.br/'
+                    }
+
+                    response = requests.get(image_url, headers=headers, timeout=20, allow_redirects=True)
+                    if response.status_code != 200:
+                        logger.error(f"Erro ao baixar imagem da URL para upload: {response.status_code}")
+                        return image_url  # Retorna a URL original caso falhe
+
+                    # Upload dos dados baixados
+                    files = {'image': ('image.jpg', response.content, 'image/jpeg')}
+                except Exception as e:
+                    logger.error(f"Erro ao processar URL da imagem: {str(e)}")
+                    return image_url  # Retorna a URL original caso falhe
+            else:
+                logger.error("Nenhum tipo de entrada de imagem válida.")
+                return None
+
+            # Upload para o ImgBB
             retries = 3
             for attempt in range(retries):
                 try:
-                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
                     response = requests.post(
                         'https://api.imgbb.com/1/upload',
                         params={'key': '8234882d2cc5bc9c7f2f239283951076'},
@@ -70,7 +112,7 @@ class ProdutoFinder:
                         logger.info(f"Imagem convertida para URL: {url}")
                         return url
                     else:
-                        logger.error(f"Erro no upload da imagem: {response.status_code}")
+                        logger.error(f"Erro no upload da imagem: {response.status_code} - {response.text}")
                         if attempt < retries - 1:
                             time.sleep(2)
                             continue
@@ -79,13 +121,23 @@ class ProdutoFinder:
                     if attempt < retries - 1:
                         time.sleep(2)
                         continue
+
+            # Se chegou aqui e temos uma URL original, retorne ela
+            if image_url:
+                return image_url
+
             return None
 
         except Exception as e:
             logger.error(f"Erro ao converter imagem: {str(e)}")
+            # Se temos uma URL original, retorne ela mesmo em caso de erro
+            if image_url:
+                return image_url
             return None
 
     def _initialize_driver(self):
+        import random
+
         chrome_options = Options()
 
         # Essential configurations
@@ -99,11 +151,11 @@ class ProdutoFinder:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        # User agent mais realista
-        chrome_options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36')
+        # User agent rotativo mais realista
+        user_agent = random.choice(self.user_agents)
+        chrome_options.add_argument(f'--user-agent={user_agent}')
 
-        # Outras configurações
+        # Configurações de idioma e janela
         chrome_options.add_argument('--lang=pt-BR')
         chrome_options.add_argument('--window-size=1920,1080')
 
@@ -118,8 +170,7 @@ class ProdutoFinder:
 
         # Performance settings
         prefs = {
-            'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_settings.images': 2,
+            'profile.default_content_settings.images': 1,  # Permitir imagens para o Google Lens funcionar
             'disk-cache-size': 1,
             'profile.password_manager_enabled': False,
             'profile.default_content_settings.popups': 2,
@@ -129,6 +180,7 @@ class ProdutoFinder:
         chrome_options.add_experimental_option('prefs', prefs)
 
         try:
+            # Usar o ChromeDriver mais recente, com melhor compatibilidade
             service = Service(
                 executable_path='/usr/local/bin/chromedriver',
                 log_path='/dev/null'  # Disable logging
@@ -144,7 +196,15 @@ class ProdutoFinder:
                 'source': '''
                     Object.defineProperty(navigator, 'webdriver', {
                         get: () => undefined
-                    })
+                    });
+
+                    // Esconder o WebDriver completamente
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({state: Notification.permission}) :
+                            originalQuery(parameters)
+                    );
                 '''
             })
 
@@ -172,144 +232,152 @@ class ProdutoFinder:
             finally:
                 self.driver = None
 
-    def buscar_produtos(self, imagem):
+    def buscar_produtos_por_url(self, url):
+        """Busca produtos diretamente usando a URL da imagem"""
         try:
             if not self.driver and not self._initialize_driver():
                 logger.error("Falha ao inicializar o driver")
                 return []
 
-            img_url = self._convert_image_to_url(imagem)
+            # Primeiro tenta realocar a imagem para o ImgBB para evitar problemas de CORS
+            img_url = self._convert_image_to_url(image_url=url)
+            if not img_url:
+                logger.error("Falha ao converter URL da imagem para serviço confiável")
+                img_url = url  # usa a URL original se falhar
+
+            # URL direta para o Google Lens com a imagem
+            search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
+            logger.info(f"Buscando no Google Lens: {search_url}")
+
+            return self._executar_busca(search_url)
+
+        except Exception as e:
+            logger.error(f"Busca de produtos por URL falhou: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
+        finally:
+            self.cleanup()
+
+    def buscar_produtos(self, imagem=None, url=None, image_data=None):
+        """
+        Busca produtos usando uma imagem, URL de imagem ou dados binários
+        Parâmetros:
+            imagem: objeto PIL.Image
+            url: URL da imagem
+            image_data: dados binários da imagem
+        """
+        try:
+            # Verifique qual método usar
+            if url:
+                return self.buscar_produtos_por_url(url)
+
+            if not self.driver and not self._initialize_driver():
+                logger.error("Falha ao inicializar o driver")
+                return []
+
+            # Converter a imagem para URL
+            if imagem:
+                img_url = self._convert_image_to_url(image=imagem)
+            elif image_data:
+                img_url = self._convert_image_to_url(image_data=image_data)
+            else:
+                logger.error("Nenhuma imagem ou URL fornecida para busca")
+                return []
+
             if not img_url:
                 logger.error("Falha ao converter imagem para URL")
                 return []
 
-            # URL direta para o Google Lens com a imagem
+            # URL para o Google Lens
             search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-            products = []
-
             logger.info(f"Buscando no Google Lens: {search_url}")
 
-            for attempt in range(self.max_retries):
-                try:
-                    self.driver.delete_all_cookies()
-                    self.driver.get(search_url)
-
-                    # Tempo de espera maior para carregamento da página
-                    logger.info("Aguardando carregamento da página...")
-                    time.sleep(10)  # Aumentado para 10 segundos
-
-                    # Verificar se a página foi carregada corretamente
-                    page_source = self.driver.page_source
-                    if "Google Lens" not in page_source:
-                        logger.warning(f"Página do Google Lens não carregou corretamente (tentativa {attempt + 1})")
-                        if attempt < self.max_retries - 1:
-                            self._initialize_driver()
-                            continue
-
-                    # Tentar localizar o botão "Shopping" e clicar nele, se existir
-                    try:
-                        shopping_tab = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Shopping')]")
-                        shopping_tab.click()
-                        time.sleep(5)  # Esperar o carregamento após clicar
-                        logger.info("Clicou na aba Shopping")
-                    except Exception as e:
-                        logger.warning(f"Não foi possível encontrar a aba Shopping: {str(e)}")
-
-                    # Salvar screenshot para debug
-                    self.driver.save_screenshot(f'/tmp/lens_attempt_{attempt}.png')
-                    logger.info(f"Screenshot salvo em /tmp/lens_attempt_{attempt}.png")
-
-                    products = self._extract_products_selenium()
-                    if products:
-                        logger.info(f"Encontrados {len(products)} produtos")
-                        break
-                    else:
-                        logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}")
-
-                    time.sleep(2)
-                except Exception as e:
-                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                    if attempt < self.max_retries - 1:
-                        self._initialize_driver()
-
-            return products[:5]  # Limit results to reduce memory usage
+            return self._executar_busca(search_url)
 
         except Exception as e:
             logger.error(f"Busca de produtos falhou: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
         finally:
-            self.cleanup()  # Ensure cleanup after each search
+            self.cleanup()
 
-    def _extract_products_selenium(self):
-        """Extrai produtos usando XPath"""
+    def _executar_busca(self, search_url):
+        """Método interno para executar a busca no Google Lens"""
         products = []
-        try:
-            # Ajuste para aguardar o carregamento dos resultados (usando WebDriverWait)
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
 
-            # Esperar elementos de produtos carregarem
-            wait = WebDriverWait(self.driver, 15)
-
-            # Xpaths atualizados para o Google Lens (verifique a estrutura atual)
-            product_containers = wait.until(EC.presence_of_all_elements_located(
-                (By.XPATH, "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]")
-            ))
-
-            logger.info(f"Encontrados {len(product_containers)} produtos potenciais")
-
-            for container in product_containers[:10]:
-                try:
-                    # Extrair título
-                    title_element = container.find_element(By.XPATH, ".//div[contains(@class, 'AJB7ye')]")
-                    title = title_element.text.strip() if title_element else None
-
-                    # Extrair link
-                    link_element = container.find_element(By.XPATH, ".//a")
-                    link = link_element.get_attribute('href') if link_element else None
-
-                    # Extrair preço
-                    price_element = container.find_element(By.XPATH, ".//span[contains(@class, 'e10twf')]")
-                    price_text = price_element.text.strip() if price_element else None
-                    price = None
-
-                    if price_text:
-                        # Extrair números do preço
-                        price_matches = re.findall(r'R\$\s*[\d.,]+|\d+[\d.,]*\s*reais', price_text)
-                        if price_matches:
-                            price_str = price_matches[0]
-                            price = float(re.sub(r'[^\d,.]', '', price_str).replace(',', '.'))
-
-                    # Extrair imagem
-                    img_element = container.find_element(By.XPATH, ".//img")
-                    img = img_element.get_attribute('src') if img_element else None
-
-                    if title and link:
-                        product = {
-                            "nome": title,
-                            "preco": price,
-                            "link": link,
-                            "imagem": img
-                        }
-                        products.append(product)
-                        logger.info(f"Produto encontrado: {title}")
-
-                except Exception as e:
-                    logger.error(f"Erro ao extrair dados do produto: {str(e)}")
-                    continue
-
-            return products
-
-        except Exception as e:
-            logger.error(f"Erro ao extrair produtos: {str(e)}")
-            # Salvar screenshot para debug
+        for attempt in range(self.max_retries):
             try:
-                self.driver.save_screenshot('/tmp/lens_error.png')
-                logger.info("Screenshot salvo em /tmp/lens_error.png")
-            except:
-                pass
-            return []
+                self.driver.delete_all_cookies()
+                self.driver.get(search_url)
 
+                # Tempo de espera maior para carregamento da página
+                logger.info("Aguardando carregamento da página...")
+                time.sleep(10)  # Tempo de espera inicial
+
+                # Verificar se a página foi carregada corretamente
+                page_source = self.driver.page_source
+                if "Google Lens" not in page_source:
+                    logger.warning(f"Página do Google Lens não carregou corretamente (tentativa {attempt + 1})")
+                    if attempt < self.max_retries - 1:
+                        self._initialize_driver()
+                        continue
+
+                # Aguardar carregamento completo com WebDriverWait
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+
+                try:
+                    # Tentar localizar o botão "Shopping" e clicar nele, se existir
+                    wait = WebDriverWait(self.driver, 15)
+                    shopping_tab = wait.until(
+                        EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Shopping')]"))
+                    )
+                    shopping_tab.click()
+                    logger.info("Clicou na aba Shopping")
+                    time.sleep(5)  # Esperar o carregamento após clicar
+                except Exception as e:
+                    logger.warning(f"Não foi possível encontrar a aba Shopping: {str(e)}")
+
+                    # Tentar localizar a área de produtos mesmo sem a aba
+                    try:
+                        # Verificar se já estamos na seção de produtos
+                        product_check = self.driver.find_elements(By.XPATH,
+                                                                  "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]")
+                        if product_check:
+                            logger.info("Já estamos na seção de produtos")
+                        else:
+                            logger.warning("Não foi possível encontrar produtos nem a aba shopping")
+                    except:
+                        pass
+
+                # Salvar screenshot para debug
+                self.driver.save_screenshot(f'/tmp/lens_attempt_{attempt}.png')
+                logger.info(f"Screenshot salvo em /tmp/lens_attempt_{attempt}.png")
+
+                products = self._extract_products_selenium()
+                if products:
+                    logger.info(f"Encontrados {len(products)} produtos")
+                    break
+                else:
+                    logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}")
+
+                    # Tentar métodos alternativos de extração
+                    products = self._extract_products_alternate()
+                    if products:
+                        logger.info(f"Encontrados {len(products)} produtos usando método alternativo")
+                        break
+
+                time.sleep(2)
+            except Exception as e:
+                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                if attempt < self.max_retries - 1:
+                    self._initialize_driver()
+
+        return products[:5]  # Limit results to reduce memory usage
 
 # Instância do ProdutoFinder
 finder = ProdutoFinder()
@@ -464,6 +532,7 @@ def lista_fichas():
         logger.error(f"Erro ao listar fichas: {str(e)}")
         return f"Erro ao processar a solicitação: {str(e)}", 500
 
+
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
@@ -504,40 +573,142 @@ def detalhes_ficha(id):
         cursor.execute(sql, (id,))
         ficha = cursor.fetchone()
 
-        dados_serializados = ficha['arquivo'].encode('utf-8')
-        dados = phpserialize.loads(dados_serializados, decode_strings=True)
-        ficha['arquivo_url'] = dados['file']['file_url'][0]
-
-        cursor.close()
-
         if not ficha:
+            cursor.close()
             conn.close()
             return "Ficha não encontrada", 404
+
+        # Processa informação de arquivo (imagem)
+        if ficha.get('arquivo'):
+            try:
+                dados_serializados = ficha['arquivo'].encode('utf-8')
+                dados = phpserialize.loads(dados_serializados, decode_strings=True)
+                ficha['arquivo_url'] = dados['file']['file_url'][0]
+            except Exception as e:
+                logger.error(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
+                ficha['arquivo_url'] = None
+        else:
+            ficha['arquivo_url'] = None
+
+        cursor.close()
+        conn.close()
+
+        # Formatar data de compra para o formato brasileiro (se disponível)
+        if ficha.get('dataDeCompra'):
+            try:
+                # Tenta parsear a data para formato brasileiro
+                data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
+                ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
+            except:
+                try:
+                    # Tenta parsear caso já esteja no formato DD/MM/YYYY
+                    data_obj = datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
+                    ficha['dataDeCompra_br'] = ficha['dataDeCompra']
+                except:
+                    ficha['dataDeCompra_br'] = ficha['dataDeCompra']
+        else:
+            ficha['dataDeCompra_br'] = None
 
         # Buscar produtos similares usando a imagem (se disponível)
         produtos_similares = []
         if ficha.get('arquivo_url'):
             try:
-                arquivo_path = ficha['arquivo_url']
-                # Se for uma URL, baixa a imagem
-                if arquivo_path.startswith(('http://', 'https://')):
-                    response = requests.get(arquivo_path)
-                    if response.status_code == 200:
-                        img = Image.open(io.BytesIO(response.content))
+                arquivo_url = ficha['arquivo_url']
+                logger.info(f"Buscando produtos similares para a imagem: {arquivo_url}")
+
+                # Configurar headers para evitar o erro 406
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+                    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Referer': 'https://mude.ind.br/',  # Ajuste este valor para o domínio correto
+                    'Connection': 'keep-alive',
+                    'DNT': '1'
+                }
+
+                # Tenta baixar a imagem com as configurações corretas
+                response = requests.get(arquivo_url, headers=headers, timeout=30, allow_redirects=True)
+
+                # Verifica o status code
+                logger.info(f"Status code da resposta: {response.status_code}")
+
+                if response.status_code == 200:
+                    img_bytes = io.BytesIO(response.content)
+                    # Verifica se o conteúdo é realmente uma imagem
+                    try:
+                        img = Image.open(img_bytes)
+
+                        # Redimensionar a imagem para otimizar a busca
+                        max_size = (800, 800)
+                        img.thumbnail(max_size, Image.LANCZOS)
+
                         # Busca produtos similares usando a imagem
                         produtos_similares = finder.buscar_produtos(img)
-                # Se for um caminho local
+                        logger.info(f"Encontrados {len(produtos_similares)} produtos similares")
+                    except Exception as img_error:
+                        logger.error(f"Erro ao processar a imagem: {str(img_error)}")
+                        # Tenta um método alternativo - usar a URL diretamente
+                        try:
+                            # Fazer upload da imagem para imgbb antes de usar no Google Lens
+                            # para evitar problemas de cross-origin
+                            response_content = response.content
+                            files = {'image': ('image.jpg', response_content, 'image/jpeg')}
+                            imgbb_response = requests.post(
+                                'https://api.imgbb.com/1/upload',
+                                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                                files=files,
+                                timeout=30
+                            )
+
+                            if imgbb_response.status_code == 200:
+                                img_url = imgbb_response.json()['data']['url']
+                                logger.info(f"Imagem reupload com sucesso: {img_url}")
+
+                                # Criar instância temporária do ProdutoFinder
+                                temp_finder = ProdutoFinder()
+                                search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
+                                produtos_similares = temp_finder._extract_products_alternate()
+                                logger.info(f"Método alternativo encontrou {len(produtos_similares)} produtos")
+                        except Exception as alt_error:
+                            logger.error(f"Método alternativo também falhou: {str(alt_error)}")
                 else:
-                    if os.path.exists(arquivo_path):
-                        img = Image.open(arquivo_path)
-                        produtos_similares = finder.buscar_produtos(img)
+                    # Se o status não for 200, tente uma abordagem alternativa
+                    logger.error(f"Falha ao baixar imagem. Status code: {response.status_code}")
+                    logger.error(f"Resposta: {response.text[:200]}...")  # Loga os primeiros 200 caracteres da resposta
+
+                    # Tenta usar a URL diretamente sem baixar a imagem
+                    try:
+                        logger.info("Tentando abordagem alternativa: usar a URL diretamente no Google Lens")
+                        # Pode ser necessário fazer upload para um serviço terceiro que não tenha restrições
+                        # ou tentar diretamente no Google Lens
+                        direct_url = ficha['arquivo_url']
+
+                        # Inicializar o driver e buscar com a URL direta
+                        if not finder._initialize_driver():
+                            logger.error("Falha ao inicializar o driver na abordagem alternativa")
+                        else:
+                            search_url = f"https://lens.google.com/uploadbyurl?url={direct_url}"
+                            finder.driver.get(search_url)
+                            time.sleep(10)  # Espera carregar
+                            produtos_similares = finder._extract_products_alternate()
+                            logger.info(f"Método direto encontrou {len(produtos_similares)} produtos")
+                    except Exception as direct_error:
+                        logger.error(f"Abordagem direta falhou: {str(direct_error)}")
             except Exception as e:
                 logger.error(f"Erro ao buscar produtos similares: {str(e)}")
-
-        conn.close()
+                import traceback
+                logger.error(traceback.format_exc())
 
         # Cálculo do valor estimado e outras informações
-        valor_estimado = float(ficha['valor']) if ficha.get('valor') else 0.0
+        valor_estimado = 0.0
+        if ficha.get('valor'):
+            try:
+                # Trata formatação do valor (remove símbolos como R$ e converte vírgulas para pontos)
+                valor_str = re.sub(r'[^\d,.]', '', ficha['valor']).replace(',', '.')
+                valor_estimado = float(valor_str)
+            except:
+                valor_estimado = 0.0
 
         # Cálculo da demanda média e alta
         demanda_media = valor_estimado + (valor_estimado * 0.05)
@@ -553,6 +724,8 @@ def detalhes_ficha(id):
 
     except Exception as e:
         logger.error(f"Erro ao exibir detalhes da ficha: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return f"Erro ao processar a solicitação: {str(e)}", 500
 
 
