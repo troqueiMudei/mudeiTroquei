@@ -187,28 +187,7 @@
                             </div>
                         </div>
                     </div>
-                </div>
-
-                <!-- Formulário para atualizar status -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Atualizar Status</h3>
-                    </div>
-                    <div class="card-body">
-                        <form action="{{ url_for('atualizar_status', id=ficha.id) }}" method="POST" class="atualizar-status-form">
-                            <div class="mb-3">
-                                <label for="status" class="form-label"><strong>Status do Item:</strong></label>
-                                <select name="status" id="status" class="form-select">
-                                    <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Em Análise</option>
-                                    <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
-                                    <option value="Reprovado" {% if ficha.status == 'Reprovado' %}selected{% endif %}>Reprovado</option>
-                                    <option value="Pendente" {% if ficha.status == 'Pendente' %}selected{% endif %}>Pendente</option>
-                                </select>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Atualizar Status</button>
-                        </form>
-                    </div>
-                </div>
+                </div>  
             </div>
 
             <div class="col-md-4">
