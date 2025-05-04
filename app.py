@@ -1,6 +1,8 @@
 import os
 import re
-import time
+import random
+import urllib
+from telnetlib import EC
 import requests
 import io
 import base64
@@ -8,15 +10,22 @@ import logging
 import json
 from datetime import datetime
 from functools import wraps
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from flask import Flask, render_template, request, redirect, url_for, session
 import mysql.connector
 from selenium import webdriver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import WebDriverException
 import phpserialize
 import math
+import urllib.parse
+from selenium.webdriver.support.wait import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO)
@@ -39,64 +48,260 @@ DB_CONFIG = {
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
-        self.max_retries = 3
-        self.page_load_timeout = 40
+        self.base_url = "https://lens.google.com/uploadbyurl?url="
+        self.max_retries = 3  # Adicionando o atributo faltante
         self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/125.0'
         ]
+
+    def _extract_products_robust(self):
+        """Método robusto para extrair produtos com múltiplas estratégias"""
+        try:
+            # Espera até que a página esteja completamente carregada
+            time.sleep(5)
+
+            # Primeiro tenta extrair via JavaScript (mais confiável)
+            produtos = self._extract_with_javascript()
+            if produtos:
+                return produtos
+
+            # Se JavaScript não retornou resultados, tenta XPath
+            selectors = [
+                "//div[contains(@class, 'sh-dgr__grid-result')]",  # Google Shopping
+                "//div[contains(@class, 'Lv3Kxc')]",  # Google Lens
+                "//div[contains(@class, 'PJLMUc')]",  # Alternativo 1
+                "//a[contains(@class, 'UAQDqe')]",  # Alternativo 2
+                "//div[@data-product]",  # Genérico
+                "//div[contains(@class, 'commercial-unit')]"
+            ]
+
+            for selector in selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    if elements:
+                        produtos = []
+                        for element in elements[:5]:  # Limita a 5 resultados
+                            try:
+                                produto = {
+                                    "nome": self._safe_extract_text(element),
+                                    "preco": self._safe_extract_price(element),
+                                    "url": self._safe_extract_url(element),
+                                    "img": self._safe_extract_img(element)
+                                }
+                                if produto["nome"] and produto["url"]:
+                                    produtos.append(produto)
+                            except Exception as e:
+                                logger.warning(f"Erro ao extrair produto: {str(e)}")
+                                continue
+                        if produtos:
+                            return produtos
+                except Exception as e:
+                    continue
+
+            return []
+
+        except Exception as e:
+            logger.error(f"Erro na extração robusta: {str(e)}")
+            return []
+
+    def _safe_extract_img(self, element):
+        """Extrai imagem do elemento de forma segura"""
+        try:
+            img = element.find_element(By.XPATH, ".//img")
+            return img.get_attribute('src')
+        except:
+            return ""
+
+    def _safe_extract_url(self, element):
+        """Extrai URL do elemento de forma segura"""
+        try:
+            # Tenta encontrar um link
+            try:
+                if element.tag_name == 'a':
+                    return element.get_attribute('href')
+            except:
+                pass
+
+            # Tenta encontrar um link dentro do elemento
+            try:
+                link = element.find_element(By.XPATH, ".//a")
+                return link.get_attribute('href')
+            except:
+                pass
+
+            return "#"
+        except:
+            return "#"
+
+    def _safe_extract_price(self, element):
+        """Extrai preço do elemento de forma segura"""
+        try:
+            # Tenta vários seletores possíveis para o preço
+            for selector in [
+                ".//span[contains(@class, 'price')]",
+                ".//span[contains(@class, 'e10twf')]",
+                ".//span[contains(@class, 'a8Pemb')]",
+                ".//span[contains(@class, 'T14wmb')]"
+            ]:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    price = el.text.strip()
+                    if price:
+                        return price
+                except:
+                    continue
+            return "Preço não disponível"
+        except:
+            return "Preço não disponível"
 
     def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
         """
-        Converte uma imagem para URL usando o serviço imgbb
-        Aceita PIL.Image, URL ou dados binários da imagem
+        Improved: Convert an image to URL using the imgbb service
+        Accepts PIL.Image, URL or binary image data
         """
         try:
             if image is not None:
-                # Se recebemos uma imagem PIL
+                # If we received a PIL image
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
 
-                # Reduzir o tamanho da imagem para melhorar o desempenho
-                max_size = (800, 800)
-                image.thumbnail(max_size, Image.LANCZOS)
+                # Optimize image for better Google Lens processing
+                # Not too small as it needs details, not too large to avoid upload issues
+                optimal_size = (1000, 1000)
+                image.thumbnail(optimal_size, Image.LANCZOS)
+
+                # Enhance image contrast slightly for better recognition
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1.2)
+
+                # Sharpen image slightly
+                from PIL import ImageFilter
+                image = image.filter(ImageFilter.SHARPEN)
 
                 img_buffer = io.BytesIO()
-                image.save(img_buffer, format='JPEG', quality=85)
+                image.save(img_buffer, format='JPEG', quality=90)  # Higher quality for better recognition
                 img_buffer.seek(0)
                 files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
 
             elif image_data is not None:
-                # Se recebemos dados binários da imagem
-                files = {'image': ('image.jpg', image_data, 'image/jpeg')}
+                # If we received binary image data
+                try:
+                    # Try to process the binary data to enhance it
+                    img = Image.open(io.BytesIO(image_data))
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+
+                    # Optimize size
+                    optimal_size = (1000, 1000)
+                    img.thumbnail(optimal_size, Image.LANCZOS)
+
+                    # Enhance image
+                    from PIL import ImageEnhance
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(1.2)
+
+                    # Sharpen
+                    from PIL import ImageFilter
+                    img = img.filter(ImageFilter.SHARPEN)
+
+                    # Save to buffer
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='JPEG', quality=90)
+                    img_buffer.seek(0)
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                except Exception as img_error:
+                    # Fall back to direct binary data if processing fails
+                    logger.warning(f"Failed to process image data: {str(img_error)}")
+                    files = {'image': ('image.jpg', image_data, 'image/jpeg')}
 
             elif image_url is not None:
-                # Se recebemos uma URL
+                # If we received a URL
                 try:
-                    # Tenta baixar a imagem da URL com headers adequados
+                    # Try to download the image from URL with appropriate headers
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
                         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                        'Referer': 'https://mude.ind.br/'
+                        'Referer': 'https://mude.ind.br/',
+                        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                     }
 
-                    response = requests.get(image_url, headers=headers, timeout=20, allow_redirects=True)
-                    if response.status_code != 200:
-                        logger.error(f"Erro ao baixar imagem da URL para upload: {response.status_code}")
-                        return image_url  # Retorna a URL original caso falhe
+                    # Try multiple times with increasing timeouts
+                    for attempt in range(3):
+                        try:
+                            timeout = 10 * (attempt + 1)  # 10, 20, 30 seconds
+                            response = requests.get(
+                                image_url,
+                                headers=headers,
+                                timeout=timeout,
+                                allow_redirects=True
+                            )
 
-                    # Upload dos dados baixados
-                    files = {'image': ('image.jpg', response.content, 'image/jpeg')}
+                            if response.status_code == 200:
+                                break
+                            else:
+                                logger.warning(
+                                    f"Attempt {attempt + 1}: Failed to download, status {response.status_code}")
+                                time.sleep(2)
+                        except Exception as req_error:
+                            logger.warning(f"Attempt {attempt + 1} failed: {str(req_error)}")
+                            if attempt < 2:  # Don't sleep on last attempt
+                                time.sleep(2)
+
+                    if response.status_code != 200:
+                        logger.error(f"Error downloading image from URL: {response.status_code}")
+                        # Try alternative URL processing
+                        try:
+                            # Try a different approach - use requests with a different user agent
+                            alt_headers = {
+                                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                            }
+                            response = requests.get(image_url, headers=alt_headers, timeout=30)
+                            if response.status_code != 200:
+                                return image_url  # Return original URL if all fails
+                        except:
+                            return image_url  # Return original URL if fails
+
+                    # Try to process the downloaded image
+                    try:
+                        img = Image.open(io.BytesIO(response.content))
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+
+                        # Optimize size
+                        optimal_size = (1000, 1000)
+                        img.thumbnail(optimal_size, Image.LANCZOS)
+
+                        # Enhance image
+                        from PIL import ImageEnhance
+                        enhancer = ImageEnhance.Contrast(img)
+                        img = enhancer.enhance(1.2)
+
+                        # Sharpen
+                        from PIL import ImageFilter
+                        img = img.filter(ImageFilter.SHARPEN)
+
+                        # Save to buffer
+                        img_buffer = io.BytesIO()
+                        img.save(img_buffer, format='JPEG', quality=90)
+                        img_buffer.seek(0)
+                        files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                    except Exception as proc_error:
+                        # Fall back to direct binary data if processing fails
+                        logger.warning(f"Failed to process downloaded image: {str(proc_error)}")
+                        files = {'image': ('image.jpg', response.content, 'image/jpeg')}
+
                 except Exception as e:
-                    logger.error(f"Erro ao processar URL da imagem: {str(e)}")
-                    return image_url  # Retorna a URL original caso falhe
+                    logger.error(f"Error processing image URL: {str(e)}")
+                    return image_url  # Return original URL if all fails
             else:
-                logger.error("Nenhum tipo de entrada de imagem válida.")
+                logger.error("No valid image input provided.")
                 return None
 
-            # Upload para o ImgBB
+            # Try multiple image hosting services in case one fails
+            # First try ImgBB
             retries = 3
             for attempt in range(retries):
                 try:
@@ -107,157 +312,777 @@ class ProdutoFinder:
                         timeout=30
                     )
 
-                    if response.status_code == 200:
+                    if response.status_code == 200 and 'data' in response.json() and 'url' in response.json()['data']:
                         url = response.json()['data']['url']
-                        logger.info(f"Imagem convertida para URL: {url}")
+                        logger.info(f"Image converted to URL: {url}")
                         return url
                     else:
-                        logger.error(f"Erro no upload da imagem: {response.status_code} - {response.text}")
+                        logger.error(f"Error uploading image: {response.status_code} - {response.text}")
                         if attempt < retries - 1:
                             time.sleep(2)
                             continue
                 except Exception as e:
-                    logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
                     if attempt < retries - 1:
                         time.sleep(2)
                         continue
 
-            # Se chegou aqui e temos uma URL original, retorne ela
+            # If ImgBB fails, try a fallback approach
+            try:
+                # Create a new buffer with the image data
+                if 'img_buffer' in locals():
+                    img_buffer.seek(0)
+                    data = img_buffer.getvalue()
+                else:
+                    data = files['image'][1].read()
+
+                # Try base64 encoding approach
+                import base64
+                encoded = base64.b64encode(data).decode('utf-8')
+                # Return data URI format - many search engines can handle this format
+                return f"data:image/jpeg;base64,{encoded}"
+            except Exception as fallback_error:
+                logger.error(f"Fallback approach failed: {str(fallback_error)}")
+
+            # If we have an original URL, return it
             if image_url:
                 return image_url
 
             return None
 
         except Exception as e:
-            logger.error(f"Erro ao converter imagem: {str(e)}")
-            # Se temos uma URL original, retorne ela mesmo em caso de erro
+            logger.error(f"Error converting image: {str(e)}")
+            # If we have an original URL, return it on error
             if image_url:
                 return image_url
             return None
 
-    def _initialize_driver(self):
-        import random
+    def _extract_products_selenium(self):
+        """Método robusto para extração de produtos em 2024"""
+        try:
+            # Mostra a URL atual para debug
+            print(f"\nURL atual: {self.driver.current_url}")
 
-        chrome_options = Options()
+            # Espera pelo container principal
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc]"))
+            )
 
-        # Essential configurations
-        chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
+            # Rolagem progressiva para carregar todos os elementos
+            for y in [300, 600, 900]:
+                self.driver.execute_script(f"window.scrollTo(0, {y});")
+                time.sleep(1.5)
 
-        # Anti-bot detection
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
+            # Extrai os produtos usando JavaScript
+            produtos = self.driver.execute_script("""
+                const results = [];
+                const containers = document.querySelectorAll('div[data-snc]');
 
-        # User agent rotativo mais realista
-        user_agent = random.choice(self.user_agents)
-        chrome_options.add_argument(f'--user-agent={user_agent}')
+                containers.forEach(container => {
+                    const products = container.querySelectorAll('div[data-snf]');
 
-        # Configurações de idioma e janela
-        chrome_options.add_argument('--lang=pt-BR')
-        chrome_options.add_argument('--window-size=1920,1080')
+                    products.forEach(product => {
+                        try {
+                            const name = product.querySelector('[role="heading"]')?.innerText?.trim();
+                            const price = product.querySelector('span[aria-hidden="true"]')?.innerText?.trim();
+                            const link = product.querySelector('a')?.href;
+                            const image = product.querySelector('img')?.src;
 
-        # Memory optimization
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--disk-cache-size=1')
-        chrome_options.add_argument('--media-cache-size=1')
-        chrome_options.add_argument('--disable-application-cache')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-logging')
+                            if (name && link) {
+                                results.push({
+                                    nome: name,
+                                    preco: price || 'Preço não disponível',
+                                    url: link,
+                                    img: image || ''
+                                });
+                            }
+                        } catch(e) {
+                            console.error('Error extracting product:', e);
+                        }
+                    });
+                });
 
-        # Performance settings
-        prefs = {
-            'profile.default_content_settings.images': 1,  # Permitir imagens para o Google Lens funcionar
-            'disk-cache-size': 1,
-            'profile.password_manager_enabled': False,
-            'profile.default_content_settings.popups': 2,
-            'download.prompt_for_download': False,
-            'download.default_directory': '/tmp/downloads'
-        }
-        chrome_options.add_experimental_option('prefs', prefs)
+                return results.slice(0, 5); // Limita a 5 resultados
+            """)
+
+            if not produtos:
+                print("Nenhum produto encontrado via JavaScript, tentando método alternativo...")
+                return self._extract_products_alternative()
+
+            return produtos
+
+        except Exception as e:
+            print(f"Erro na extração principal: {str(e)}")
+            return self._extract_products_alternative()
+
+    def _extract_products_alternative(self):
+        """Método alternativo quando o principal falha"""
+        try:
+            # Tenta encontrar elementos de forma mais genérica
+            produtos = []
+            elements = self.driver.find_elements(By.CSS_SELECTOR, "div[role='listitem'], div[role='article']")
+
+            for element in elements[:5]:  # Limita a 5 itens
+                try:
+                    produto = {
+                        "nome": element.find_element(By.CSS_SELECTOR, "[role='heading']").text,
+                        "preco": element.find_element(By.CSS_SELECTOR, "span").text,
+                        "url": element.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
+                        "img": element.find_element(By.CSS_SELECTOR, "img").get_attribute("src")
+                    }
+                    produtos.append(produto)
+                except:
+                    continue
+
+            return produtos if produtos else []
+        except:
+            return []
+
+    def fallback_search_by_image_description(self, image_path=None, description=None):
+        """
+        Fallback method that uses text search instead of image search
+        Extracts features from the image and searches for those terms
+
+        Args:
+            image_path: Path to image file
+            description: Description of the product if available
+
+        Returns:
+            List of product dictionaries
+        """
+        try:
+            search_terms = []
+
+            # If we have a description, use that first
+            if description and len(description) > 5:
+                search_terms.append(description)
+
+            # Try to extract information from the image if available
+            if image_path:
+                try:
+                    # Try to use basic image processing to extract color information
+                    img = Image.open(image_path)
+
+                    # Get dominant color
+                    from collections import Counter
+                    img = img.convert('RGB').resize((100, 100))
+                    pixels = list(img.getdata())
+                    counter = Counter(pixels)
+                    dominant_color = counter.most_common(1)[0][0]
+                    r, g, b = dominant_color
+
+                    # Convert RGB to basic color name
+                    color_map = {
+                        (0, 0, 0): "preto",
+                        (255, 255, 255): "branco",
+                        (255, 0, 0): "vermelho",
+                        (0, 255, 0): "verde",
+                        (0, 0, 255): "azul",
+                        (255, 255, 0): "amarelo",
+                        (255, 165, 0): "laranja",
+                        (128, 0, 128): "roxo",
+                        (165, 42, 42): "marrom",
+                        (192, 192, 192): "prata",
+                        (255, 192, 203): "rosa"
+                    }
+
+                    # Find closest color by Euclidean distance
+                    min_distance = float('inf')
+                    closest_color = "colorido"
+                    for rgb, name in color_map.items():
+                        distance = ((r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2) ** 0.5
+                        if distance < min_distance:
+                            min_distance = distance
+                            closest_color = name
+
+                    basic_description = f"{closest_color}"
+                    search_terms.append(basic_description)
+
+                    # Add some common search terms that might help
+                    if description and "móvel" in description.lower():
+                        search_terms.append("móvel decoração casa")
+                    elif description and "roupa" in description.lower():
+                        search_terms.append("roupas moda")
+                    else:
+                        search_terms.append("produto similar")
+
+                except Exception as img_error:
+                    logger.error(f"Error extracting image info: {str(img_error)}")
+                    search_terms.append("produto similar")
+
+            # Use the search terms to perform a Google Shopping search
+            produtos = []
+
+            # Select best search term
+            search_query = search_terms[0]
+
+            # Try to execute a Google Shopping search
+            shopping_url = f"https://www.google.com/search?q={search_query}&tbm=shop"
+
+            if not self.driver and not self._initialize_driver():
+                logger.error("Failed to initialize driver for fallback search")
+                return []
+
+            try:
+                self.driver.get(shopping_url)
+                time.sleep(5)
+
+                # Extract products using our comprehensive extraction function
+                produtos = self._extract_products_comprehensive()
+
+                if not produtos:
+                    # If no results, try the second search term if available
+                    if len(search_terms) > 1:
+                        search_query = search_terms[1]
+                        shopping_url = f"https://www.google.com/search?q={search_query}&tbm=shop"
+                        self.driver.get(shopping_url)
+                        time.sleep(5)
+                        produtos = self._extract_products_comprehensive()
+
+                return produtos[:5]  # Return up to 5 products
+
+            except Exception as e:
+                logger.error(f"Error in fallback search: {str(e)}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Failed to perform fallback search: {str(e)}")
+            return []
+
+    def _extract_products_alternate(self):
+        """Método alternativo para extrair produtos do Google Lens"""
+        if not self.driver or not self._initialize_driver():
+            logger.error("Driver não inicializado para extração alternativa")
+            return []
 
         try:
-            # Usar o ChromeDriver mais recente, com melhor compatibilidade
-            service = Service(
-                executable_path='/usr/local/bin/chromedriver',
-                log_path='/dev/null'  # Disable logging
-            )
+            produtos = []
+            # Aguardar um pouco para garantir que a página carregou
+            time.sleep(5)
 
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
+            # Tentar vários seletores diferentes
+            selectors = [
+                "//div[contains(@class, 'sh-dgr__grid-result')]",  # Google Shopping
+                "//div[contains(@class, 'Lv3Kxc')]",  # Google Lens
+                "//div[contains(@class, 'PJLMUc')]",  # Alternativo 1
+                "//a[contains(@class, 'UAQDqe')]",  # Alternativo 2
+                "//div[@data-product]"  # Seletores genéricos
+            ]
 
-            # Adicionar JavaScript para ocultar automação
-            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': '''
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
+            for selector in selectors:
+                try:
+                    elements = WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_all_elements_located((By.XPATH, selector))
+                    )
 
-                    // Esconder o WebDriver completamente
-                    const originalQuery = window.navigator.permissions.query;
-                    window.navigator.permissions.query = (parameters) => (
-                        parameters.name === 'notifications' ?
-                            Promise.resolve({state: Notification.permission}) :
-                            originalQuery(parameters)
-                    );
-                '''
-            })
+                    if elements:
+                        logger.info(f"Encontrados {len(elements)} elementos com {selector}")
 
-            self.driver.set_page_load_timeout(self.page_load_timeout)
-            self.driver.implicitly_wait(10)
+                        for element in elements[:5]:  # Limitar a 5 resultados
+                            try:
+                                produto = {
+                                    "nome": self._safe_extract_text(element, [
+                                        ".//h3", ".//h4",
+                                        ".//div[contains(@class, 'title')]",
+                                        ".//div[contains(@class, 'header')]"
+                                    ]),
+                                    "preco": self._safe_extract_text(element, [
+                                        ".//span[contains(@class, 'price')]",
+                                        ".//span[contains(@class, 'e10twf')]"
+                                    ]),
+                                    "url": self._safe_extract_attr(element, "href", [
+                                        ".//a"
+                                    ]),
+                                    "img": self._safe_extract_attr(element, "src", [
+                                        ".//img"
+                                    ])
+                                }
 
-            return True
+                                if produto["nome"] and produto["url"]:
+                                    produtos.append(produto)
+                            except Exception as e:
+                                logger.warning(f"Erro ao extrair produto: {str(e)}")
+                                continue
+
+                        if produtos:  # Se encontrou produtos, para de tentar outros seletores
+                            break
+                except Exception as e:
+                    logger.warning(f"Seletor {selector} não encontrado: {str(e)}")
+                    continue
+
+            return produtos[:5]  # Retorna no máximo 5 produtos
+
         except Exception as e:
-            logger.error(f"Driver initialization failed: {str(e)}")
-            if self.driver:
-                self.driver.quit()
-            return False
+            logger.error(f"Erro na extração alternativa: {str(e)}")
+            return []
+
+    def _safe_extract_attr(self, element, attr, selectors):
+        """Extrai atributo de forma segura com múltiplos seletores"""
+        for selector in selectors:
+            try:
+                el = element.find_element(By.XPATH, selector)
+                if el.is_displayed():
+                    value = el.get_attribute(attr)
+                    if value:
+                        return value
+            except:
+                continue
+        return "#"
+
+    def _safe_extract_text(self, element):
+        """Extrai texto do elemento de forma segura"""
+        try:
+            # Tenta vários seletores possíveis para o nome
+            for selector in [".//h3", ".//h4", ".//div[contains(@class, 'title')]", ".//div[contains(@class, 'header')]"]:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    text = el.text.strip()
+                    if text:
+                        return text
+                except:
+                    continue
+            return "Produto similar"
+        except:
+            return "Produto similar"
+
+    def _process_image(self, image_url):
+        """Processa a imagem para otimizar a busca"""
+        try:
+            # Baixa a imagem com headers personalizados
+            headers = {
+                'User-Agent': random.choice(self.user_agents),
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Referer': 'https://www.google.com/'
+            }
+
+            response = requests.get(image_url, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            # Processa a imagem com PIL
+            img = Image.open(io.BytesIO(response.content))
+
+            # Converte para RGB se necessário
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # Otimiza tamanho e qualidade
+            img.thumbnail((800, 800), Image.LANCZOS)
+
+            # Melhora contraste e nitidez
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.2)
+            img = img.filter(ImageFilter.SHARPEN)
+
+            # Salva em buffer
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format='JPEG', quality=85)
+            img_buffer.seek(0)
+
+            return img_buffer
+        except Exception as e:
+            logger.error(f"Erro ao processar imagem: {str(e)}")
+            return None
+
+    def _upload_image(self, image_buffer):
+        """Faz upload da imagem para um serviço temporário"""
+        try:
+            files = {'image': ('optimized_image.jpg', image_buffer, 'image/jpeg')}
+
+            # Tenta primeiro com ImgBB
+            response = requests.post(
+                'https://api.imgbb.com/1/upload',
+                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                files=files,
+                timeout=20
+            )
+
+            if response.status_code == 200:
+                return response.json()['data']['url']
+
+            # Fallback para outros serviços
+            response = requests.post(
+                'https://tmpfiles.org/api/v1/upload',
+                files={'file': files['image']},
+                timeout=20
+            )
+
+            if response.status_code == 200:
+                return response.json()['data']['url']
+
+            return None
+        except Exception as e:
+            logger.error(f"Erro no upload da imagem: {str(e)}")
+            return None
+
+    def buscar_produtos_por_imagem(self, image_url):
+        """Busca produtos similares por URL de imagem (execução em background)"""
+        produtos = []
+
+        try:
+            # 1. Processa a imagem
+            logger.info("Processando imagem...")
+            img_buffer = self._process_image(image_url)
+            if not img_buffer:
+                return []
+
+            # 2. Faz upload da imagem otimizada
+            logger.info("Fazendo upload da imagem...")
+            uploaded_url = self._upload_image(img_buffer)
+            if not uploaded_url:
+                return []
+
+            # 3. Inicializa o driver em modo headless
+            if not self._initialize_driver():
+                return []
+
+            # 4. Executa a busca no Google Lens
+            logger.info("Executando busca no Google Lens...")
+            lens_url = f"https://lens.google.com/uploadbyurl?url={urllib.parse.quote(uploaded_url)}"
+            self.driver.get(lens_url)
+
+            # Espera carregar e tenta acessar a aba Shopping
+            time.sleep(8)
+            try:
+                shopping_tab = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Shopping')]"))
+                )
+                shopping_tab.click()
+                time.sleep(5)
+            except:
+                logger.warning("Não encontrou a aba Shopping, continuando...")
+
+            # 5. Extrai os produtos
+            produtos = self._extrair_produtos_avancado()
+
+            # Debug: salva screenshot e HTML para análise
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.driver.save_screenshot(f"debug_{timestamp}.png")
+            with open(f"page_source_{timestamp}.html", "w") as f:
+                f.write(self.driver.page_source)
+
+            return produtos[:5]  # Limita a 5 resultados
+
+        except Exception as e:
+            logger.error(f"Erro na busca por imagem: {str(e)}")
+            return []
+        finally:
+            self.cleanup()
+
+    def _extrair_produtos_avancado(self):
+        """Método robusto para extração de produtos com múltiplas estratégias"""
+        produtos = []
+
+        # Estratégia 1: Seletores atualizados para Google Shopping 2025
+        selectors = [
+            "//div[contains(@class, 'sh-dgr__grid-result')]",
+            "//div[contains(@class, 'sh-dlr__list-result')]",
+            "//div[contains(@class, 'pla-unit')]",
+            "//div[contains(@class, 'Lv3Kxc')]",
+            "//a[contains(@href, '/shopping/product/')]"
+        ]
+
+        for selector in selectors:
+            try:
+                elements = self.driver.find_elements(By.XPATH, selector)
+                if elements:
+                    for element in elements[:5]:  # Limita a 5 itens
+                        try:
+                            produto = {
+                                "nome": self._extrair_texto(element, [
+                                    ".//h3", ".//h4",
+                                    ".//div[contains(@class, 'title')]",
+                                    ".//div[contains(@class, 'header')]"
+                                ]),
+                                "preco": self._extrair_texto(element, [
+                                    ".//span[contains(@class, 'price')]",
+                                    ".//span[contains(@class, 'e10twf')]",
+                                    ".//span[contains(@class, 'a8Pemb')]"
+                                ]),
+                                "url": self._extrair_atributo(element, "href", [
+                                    ".//a"
+                                ]),
+                                "img": self._extrair_atributo(element, "src", [
+                                    ".//img"
+                                ])
+                            }
+
+                            if produto["nome"] and produto["url"]:
+                                produtos.append(produto)
+                        except:
+                            continue
+
+                    if produtos:
+                        break
+            except:
+                continue
+
+        # Estratégia 2: Fallback com JavaScript
+        if not produtos:
+            produtos = self._extrair_com_javascript()
+
+        return produtos
+
+    def _extrair_com_javascript(self):
+        """Fallback com extração via JavaScript"""
+        try:
+            return self.driver.execute_script("""
+                const results = [];
+                const containers = document.querySelectorAll(
+                    'div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc'
+                );
+
+                containers.forEach(container => {
+                    try {
+                        const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"]');
+                        const priceEl = container.querySelector('[class*="price"], span[class*="e10twf"], span[class*="a8Pemb"]');
+                        const linkEl = container.querySelector('a');
+                        const imgEl = container.querySelector('img');
+
+                        if (titleEl || linkEl) {
+                            results.push({
+                                nome: titleEl?.innerText?.trim() || 'Produto similar',
+                                preco: priceEl?.innerText?.trim() || 'Preço não disponível',
+                                url: linkEl?.href || '#',
+                                img: imgEl?.src || ''
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error extracting product:', e);
+                    }
+                });
+
+                return results.slice(0, 5);  // Retorna no máximo 5 produtos
+            """) or []
+        except:
+            return []
+
+    def _extrair_texto(self, element, selectors):
+        for selector in selectors:
+            try:
+                el = element.find_element(By.XPATH, selector)
+                text = el.text.strip()
+                if text:
+                    return text
+            except:
+                continue
+        return "Produto similar"
+
+    def _extrair_atributo(self, element, attr, selectors):
+        for selector in selectors:
+            try:
+                el = element.find_element(By.XPATH, selector)
+                value = el.get_attribute(attr)
+                if value:
+                    return value
+            except:
+                continue
+        return "#"
+
+    def _initialize_driver(self):
+        """Inicializa o WebDriver com configurações robustas"""
+        if self.driver:
+            return True
+
+        for attempt in range(self.max_retries):
+            try:
+                chrome_options = Options()
+                chrome_options.add_argument("--headless=new")
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--window-size=1280,720")
+                chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                chrome_options.add_experimental_option("useAutomationExtension", False)
+
+                # Configuração específica para Linux
+                chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+
+                # Solução para o erro do WebDriverManager
+                try:
+                    from selenium.webdriver.chrome.service import Service as ChromeService
+                    service = ChromeService(
+                        executable_path=ChromeDriverManager().install(),
+                        service_args=['--verbose'],
+                        log_path='chromedriver.log'
+                    )
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                except:
+                    # Fallback para quando o WebDriverManager falha
+                    self.driver = webdriver.Chrome(options=chrome_options)
+
+                self.driver.set_page_load_timeout(30)
+                return True
+
+            except Exception as e:
+                print(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                if attempt == self.max_retries - 1:
+                    print("Falha ao inicializar após múltiplas tentativas")
+                    return False
+                time.sleep(2)
+
+    def buscar_produtos_alternativo(self, image_url):
+        """Método alternativo usando pesquisa por texto"""
+        try:
+            if not self._initialize_driver():
+                return []
+
+            # 1. Tentar extrair características da imagem para criar termos de busca
+            search_terms = self._generate_search_terms(image_url)
+
+            # 2. Fazer busca no Google Shopping
+            for term in search_terms[:3]:  # Tentar os 3 primeiros termos
+                try:
+                    url = f"https://www.google.com/search?tbm=shop&q={urllib.parse.quote(term)}"
+                    self.driver.get(url)
+
+                    # Extrair produtos
+                    produtos = self._extract_products_comprehensive()
+                    if produtos:
+                        return produtos
+                except Exception as e:
+                    logger.warning(f"Busca por '{term}' falhou: {str(e)}")
+                    continue
+
+            return []
+        finally:
+            self.cleanup()
+
+    def _generate_search_terms(self, image_url):
+        """Gera termos de busca baseados na imagem"""
+        # Implemente sua lógica para gerar termos descritivos
+        # Pode usar análise de imagem ou metadados
+        return ["produto similar", "item relacionado", "produto genérico"]
 
     def __del__(self):
         self.cleanup()
 
     def cleanup(self):
-        """Explicit cleanup method"""
-        if hasattr(self, 'driver') and self.driver:
-            try:
-                self.driver.delete_all_cookies()
-                self.driver.quit()
-            except Exception as e:
-                logger.error(f"Error in cleanup: {str(e)}")
-            finally:
-                self.driver = None
-
-    def buscar_produtos_por_url(self, url):
-        """Busca produtos diretamente usando a URL da imagem"""
+        """Encerra o driver de forma segura"""
         try:
-            if not self.driver and not self._initialize_driver():
-                logger.error("Falha ao inicializar o driver")
-                return []
+            if self.driver:
+                self.driver.quit()
+                print("Driver encerrado com sucesso")
+        except Exception as e:
+            print(f"Erro ao encerrar driver: {str(e)}")
+        finally:
+            self.driver = None
 
-            # Primeiro tenta realocar a imagem para o ImgBB para evitar problemas de CORS
-            img_url = self._convert_image_to_url(image_url=url)
-            if not img_url:
-                logger.error("Falha ao converter URL da imagem para serviço confiável")
-                img_url = url  # usa a URL original se falhar
+    def _try_extract_main_method(self):
+        """Método principal de extração"""
+        try:
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]"))
+            )
 
-            # URL direta para o Google Lens com a imagem
-            search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-            logger.info(f"Buscando no Google Lens: {search_url}")
+            produtos = []
+            items = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]")[:5]
 
-            return self._executar_busca(search_url)
+            for item in items:
+                try:
+                    produto = {
+                        'nome': item.find_element(By.XPATH, ".//h3").text,
+                        'preco': item.find_element(By.XPATH, ".//span[contains(@class, 'price')]").text,
+                        'url': item.find_element(By.XPATH, ".//a").get_attribute('href'),
+                        'img': item.find_element(By.XPATH, ".//img").get_attribute('src')
+                    }
+                    produtos.append(produto)
+                except:
+                    continue
+
+            return produtos
+        except:
+            return []
+
+    def buscar_produtos_por_url(self, image_url):
+        """Busca produtos com melhor tratamento de erros e debug"""
+        print(f"\n=== Iniciando busca para imagem: {image_url} ===")
+
+        if not self._initialize_driver():
+            print("Falha ao inicializar o driver")
+            return []
+
+        try:
+            encoded_url = urllib.parse.quote(image_url)
+            search_url = f"https://lens.google.com/uploadbyurl?url={encoded_url}"
+            print(f"\nURL de busca no Google Lens: {search_url}")
+
+            self.driver.get(search_url)
+            time.sleep(8)  # Espera inicial maior
+
+            # Debug: salva a página inicial
+            self.driver.save_screenshot('initial_page.png')
+
+            # Tenta encontrar e clicar em "Shopping"
+            try:
+                shopping_tab = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                )
+                shopping_tab.click()
+                time.sleep(5)
+                print("Clicou na aba Shopping")
+            except Exception as e:
+                print(f"Não encontrou aba Shopping: {str(e)}")
+
+            # Extrai os produtos
+            produtos = self._extract_products_selenium()
+
+            # Debug final
+            print(f"\n=== Resultados encontrados ===")
+            for i, p in enumerate(produtos, 1):
+                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+
+            return produtos
 
         except Exception as e:
-            logger.error(f"Busca de produtos por URL falhou: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            print(f"\nErro durante a busca: {str(e)}")
             return []
         finally:
             self.cleanup()
+            print("\n=== Busca concluída ===")
+
+    def _try_google_shopping_fallback(self, image_url):
+        """Fallback direto para Google Shopping"""
+        try:
+            shopping_url = f"https://www.google.com/searchbyimage?&image_url={urllib.parse.quote(image_url)}&tbm=shop"
+            self.driver.get(shopping_url)
+
+            produtos = []
+            items = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]")[:3]
+
+            for item in items:
+                try:
+                    produtos.append({
+                        'nome': item.find_element(By.XPATH, ".//h3").text,
+                        'preco': item.find_element(By.XPATH, ".//span[contains(@class, 'price')]").text,
+                        'url': item.find_element(By.XPATH, ".//a").get_attribute('href'),
+                        'img': item.find_element(By.XPATH, ".//img").get_attribute('src')
+                    })
+                except:
+                    continue
+
+            return produtos
+        except:
+            return []
+
+    def _extract_with_js(self):
+        """Fallback com JavaScript"""
+        try:
+            return self.driver.execute_script("""
+                return Array.from(document.querySelectorAll('div.sh-dgr__grid-result')).slice(0,5).map(item => {
+                    try {
+                        return {
+                            nome: item.querySelector('h3')?.innerText || 'Produto similar',
+                            preco: item.querySelector('[class*="price"]')?.innerText || 'Preço não disponível',
+                            url: item.querySelector('a')?.href || '#',
+                            img: item.querySelector('img')?.src || ''
+                        }
+                    } catch(e) { return null }
+                }).filter(Boolean)
+            """)
+        except:
+            return []
 
     def buscar_produtos(self, imagem=None, url=None, image_data=None):
         """
@@ -303,6 +1128,317 @@ class ProdutoFinder:
         finally:
             self.cleanup()
 
+    def _check_for_captcha(self):
+        """Verifica se há captcha na página"""
+        captcha_selectors = [
+            "div#captcha",
+            "div.recaptcha",
+            "iframe[src*='recaptcha']",
+            "div[class*='captcha']"
+        ]
+
+        for selector in captcha_selectors:
+            try:
+                if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                    return True
+            except:
+                continue
+        return False
+
+    def _extract_with_javascript(self):
+        """Fallback com JavaScript para extração mais robusta"""
+        try:
+            return self.driver.execute_script("""
+                const results = [];
+                const container = document.querySelector('div.srKDX.cvP2Ce');
+
+                if (container) {
+                    const products = container.querySelectorAll('div.kb0PBd.cvP2Ce');
+
+                    products.forEach((product, index) => {
+                        if (index >= 5) return; // Limita a 5 resultados
+
+                        try {
+                            const nameEl = product.querySelector("div[role='heading']");
+                            const priceEl = product.querySelector("span[aria-hidden='true']");
+                            const linkEl = product.querySelector("a");
+                            const imgEl = product.querySelector("img");
+
+                            results.push({
+                                nome: nameEl?.innerText?.trim() || 'Produto similar',
+                                preco: priceEl?.innerText?.trim() || 'Preço não disponível',
+                                url: linkEl?.href || '#',
+                                img: imgEl?.src || ''
+                            });
+                        } catch (e) {
+                            console.error('Error extracting product:', e);
+                        }
+                    });
+                }
+
+                return results;
+            """) or []
+        except Exception as e:
+            logger.error(f"Erro na extração com JavaScript: {str(e)}")
+            return []
+
+    def _extract_attribute_with_retry(self, element, attr, selectors, retries=3):
+        """Tenta extrair atributo com múltiplas tentativas"""
+        for _ in range(retries):
+            for selector in selectors:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    if el.is_displayed():
+                        value = el.get_attribute(attr)
+                        if value:
+                            return value
+                except:
+                    continue
+            time.sleep(1)
+        return "#"
+
+    def _extract_products_comprehensive(self):
+        """Método mais robusto para extrair produtos"""
+        produtos = []
+
+        try:
+            # Aguardar mais tempo para carregar os resultados
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'Lv3Kxc')]"))
+            )
+
+            # Tentar vários seletores atualizados (maio/2025)
+            selectors = [
+                # Seletores para Google Shopping
+                "//div[contains(@class, 'sh-dgr__grid-result')]",
+                "//div[contains(@class, 'sh-dlr__list-result')]",
+                "//div[contains(@class, 'pla-unit')]",
+
+                # Seletores para Google Lens
+                "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]",
+                "//div[contains(@class, 'PJLMUc')]",
+                "//a[contains(@class, 'UAQDqe')]",
+
+                # Novos seletores alternativos
+                "//div[@data-product]",
+                "//div[contains(@class, 'commercial-unit')]",
+                "//div[@role='listitem']"
+            ]
+
+            for selector in selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    if elements:
+                        logger.info(f"Encontrados {len(elements)} elementos com seletor: {selector}")
+
+                        for element in elements[:5]:  # Limitar a 5 resultados
+                            try:
+                                produto = {
+                                    "nome": self._extract_with_retry(element, [
+                                        ".//h3", ".//h4",
+                                        ".//div[contains(@class, 'title')]",
+                                        ".//div[contains(@class, 'header')]"
+                                    ]),
+
+                                    "preco": self._extract_with_retry(element, [
+                                        ".//span[contains(@class, 'price')]",
+                                        ".//span[contains(@class, 'e10twf')]",
+                                        ".//span[contains(@class, 'a8Pemb')]"
+                                    ]),
+
+                                    "url": self._extract_attribute_with_retry(element, "href", [
+                                        ".//a"
+                                    ]),
+
+                                    "img": self._extract_attribute_with_retry(element, "src", [
+                                        ".//img"
+                                    ])
+                                }
+
+                                if produto["nome"] and produto["url"]:
+                                    produtos.append(produto)
+                            except Exception as e:
+                                logger.warning(f"Erro ao extrair produto: {str(e)}")
+                                continue
+
+                        if produtos:
+                            break
+                except Exception as e:
+                    logger.warning(f"Erro com seletor {selector}: {str(e)}")
+                    continue
+
+            # Se ainda não encontrou, tentar rolar a página
+            if not produtos:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3)
+                produtos = self._extract_with_javascript()
+
+        except Exception as e:
+            logger.error(f"Erro na extração: {str(e)}")
+            # Tentar fallback com JavaScript
+            produtos = self._extract_with_javascript()
+
+        return produtos or []
+
+    def _extract_products(self):
+        """Extrai produtos com múltiplas estratégias"""
+        try:
+            # Método 1: Seletores convencionais
+            produtos = []
+            items = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]")[:5]
+
+            for item in items:
+                try:
+                    produto = {
+                        'nome': item.find_element(By.XPATH, ".//h3").text,
+                        'preco': item.find_element(By.XPATH, ".//span[contains(@class, 'price')]").text,
+                        'url': item.find_element(By.XPATH, ".//a").get_attribute('href'),
+                        'img': item.find_element(By.XPATH, ".//img").get_attribute('src')
+                    }
+                    produtos.append(produto)
+                except Exception as e:
+                    print(f"Erro ao extrair produto: {str(e)}")
+                    continue
+
+            if produtos:
+                return produtos
+
+            # Método 2: JavaScript como fallback
+            return self.driver.execute_script("""
+                return Array.from(document.querySelectorAll('div.sh-dgr__grid-result')).slice(0,5).map(item => {
+                    return {
+                        nome: item.querySelector('h3')?.innerText || 'Produto',
+                        preco: item.querySelector('[class*="price"]')?.innerText || 'Preço não disponível',
+                        url: item.querySelector('a')?.href || '#',
+                        img: item.querySelector('img')?.src || ''
+                    }
+                }).filter(p => p.nome && p.url);
+            """) or []
+
+        except Exception as e:
+            print(f"Erro na extração: {str(e)}")
+            return []
+
+    def _extract_with_retry(self, element, selectors, retries=3):
+        """Tenta extrair texto com múltiplas tentativas"""
+        for _ in range(retries):
+            for selector in selectors:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    if el.is_displayed():
+                        text = el.text.strip()
+                        if text:
+                            return text
+                except:
+                    continue
+            time.sleep(1)
+        return "Produto similar"
+
+    def _extract_text(self, element, selectors):
+        """Extrai texto de um elemento usando múltiplos seletores"""
+        for selector in selectors:
+            try:
+                el = element.find_element(By.XPATH, selector)
+                text = el.text.strip()
+                if text:
+                    return text
+            except:
+                continue
+        return None
+
+    def _extract_attribute(self, element, attr, selectors):
+        """Extrai atributo de um elemento usando múltiplos seletores"""
+        for selector in selectors:
+            try:
+                el = element.find_element(By.XPATH, selector)
+                value = el.get_attribute(attr)
+                if value:
+                    return value
+            except:
+                continue
+        return None
+
+    def _extract_single_product_info(self, element):
+        """Extract all product information from a single element"""
+        produto = {
+            "nome": "Produto similar",
+            "preco": "Preço não disponível",
+            "url": "#",
+            "img": ""
+        }
+
+        # Extract product name - try multiple selectors
+        name_selectors = [
+            ".//div[contains(@class, 'zLvTHf')]",
+            ".//div[contains(@class, 'bONr3b')]",
+            ".//h3",
+            ".//h4",
+            ".//div[contains(@class, 'sh-np__product-title')]",
+            ".//div[contains(@class, 'BXIkFb')]",
+            ".//div[contains(@class, 'pymv4e')]",
+            ".//div[contains(@class, 'UAQDqe')]",
+        ]
+
+        for selector in name_selectors:
+            try:
+                name_element = element.find_element(By.XPATH, selector)
+                name = name_element.text.strip()
+                if name:
+                    produto["nome"] = name
+                    break
+            except:
+                continue
+
+        # Extract price - try multiple selectors
+        price_selectors = [
+            ".//span[contains(@class, 'e10twf')]",
+            ".//span[contains(@class, 'O8U6h')]",
+            ".//span[contains(@class, 'a8Pemb')]",
+            ".//span[contains(@class, 'T14wmb')]",
+            ".//div[contains(@class, 'NRRPPb')]",
+            ".//span[contains(@class, 'sh-np__product-price')]",
+        ]
+
+        for selector in price_selectors:
+            try:
+                price_element = element.find_element(By.XPATH, selector)
+                price = price_element.text.strip()
+                if price:
+                    produto["preco"] = price
+                    break
+            except:
+                continue
+
+        # Extract URL
+        try:
+            if element.tag_name == 'a':
+                produto["url"] = element.get_attribute('href')
+            else:
+                url_element = element.find_element(By.XPATH, ".//a")
+                produto["url"] = url_element.get_attribute('href')
+        except:
+            pass
+
+        # Extract image
+        img_selectors = [
+            ".//img",
+            ".//div[contains(@class, 'cOPFNb')]//img",
+            ".//div[contains(@class, 'eUQRje')]//img"
+        ]
+
+        for selector in img_selectors:
+            try:
+                img_element = element.find_element(By.XPATH, selector)
+                img_src = img_element.get_attribute('src')
+                if img_src:
+                    produto["img"] = img_src
+                    break
+            except:
+                continue
+
+        return produto
+
     def _executar_busca(self, search_url):
         """Método interno para executar a busca no Google Lens"""
         products = []
@@ -310,78 +1446,66 @@ class ProdutoFinder:
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
+
+                # Aumente o tempo de espera inicial aqui (altere de 5 para 10)
+                print(f"\nTentativa {attempt + 1} - Acessando URL...")
                 self.driver.get(search_url)
+                time.sleep(10)  # Alterado de 5 para 10 segundos
 
-                # Tempo de espera maior para carregamento da página
-                logger.info("Aguardando carregamento da página...")
-                time.sleep(10)  # Tempo de espera inicial
+                # Adicione a rolagem da página aqui
+                print("Rolando página para carregar mais resultados...")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/3);")
+                time.sleep(2)  # Espera após rolagem
 
-                # Verificar se a página foi carregada corretamente
+                # Verifique se há captcha
+                if self._check_for_captcha():
+                    print("Captcha detectado! Tentando contornar...")
+                    time.sleep(15)  # Espera adicional para captcha
+
+                # Restante do código existente...
                 page_source = self.driver.page_source
-                if "Google Lens" not in page_source:
-                    logger.warning(f"Página do Google Lens não carregou corretamente (tentativa {attempt + 1})")
-                    if attempt < self.max_retries - 1:
-                        self._initialize_driver()
-                        continue
 
-                # Aguardar carregamento completo com WebDriverWait
-                from selenium.webdriver.support.ui import WebDriverWait
-                from selenium.webdriver.support import expected_conditions as EC
-
+                # Tenta encontrar e clicar na aba Shopping
                 try:
-                    # Tentar localizar o botão "Shopping" e clicar nele, se existir
-                    wait = WebDriverWait(self.driver, 15)
-                    shopping_tab = wait.until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Shopping')]"))
+                    shopping_tab = WebDriverWait(self.driver, 15).until(
+                        EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Shopping')]"))
                     )
                     shopping_tab.click()
-                    logger.info("Clicou na aba Shopping")
-                    time.sleep(5)  # Esperar o carregamento após clicar
+                    time.sleep(8)  # Espera após clicar na aba
+
+                    # Adicione outra rolagem após mudar de aba
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/4);")
+                    time.sleep(2)
+
                 except Exception as e:
-                    logger.warning(f"Não foi possível encontrar a aba Shopping: {str(e)}")
+                    print(f"Não encontrou aba Shopping: {str(e)}")
 
-                    # Tentar localizar a área de produtos mesmo sem a aba
-                    try:
-                        # Verificar se já estamos na seção de produtos
-                        product_check = self.driver.find_elements(By.XPATH,
-                                                                  "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]")
-                        if product_check:
-                            logger.info("Já estamos na seção de produtos")
-                        else:
-                            logger.warning("Não foi possível encontrar produtos nem a aba shopping")
-                    except:
-                        pass
+                # Debug - salvar screenshot
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.driver.save_screenshot(f"debug_{timestamp}.png")
 
-                # Salvar screenshot para debug
-                self.driver.save_screenshot(f'/tmp/lens_attempt_{attempt}.png')
-                logger.info(f"Screenshot salvo em /tmp/lens_attempt_{attempt}.png")
-
+                # Extrai os produtos
                 products = self._extract_products_selenium()
+
                 if products:
-                    logger.info(f"Encontrados {len(products)} produtos")
+                    print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
-                else:
-                    logger.warning(f"Nenhum produto encontrado na tentativa {attempt + 1}")
 
-                    # Tentar métodos alternativos de extração
-                    products = self._extract_products_alternate()
-                    if products:
-                        logger.info(f"Encontrados {len(products)} produtos usando método alternativo")
-                        break
-
-                time.sleep(2)
             except Exception as e:
-                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
+                print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
 
-        return products[:5]  # Limit results to reduce memory usage
+        return products[:5]  # Limita a 5 resultados
 
-# Instância do ProdutoFinder
+
 finder = ProdutoFinder()
-
+# try:
+#     produtos = finder.buscar_produtos_por_url(url_da_imagem)
+#     for produto in produtos:
+#         print(f"{produto['nome']} - {produto['preco']} - {produto['url']}")
+# finally:
+#     finder.cleanup()
 
 # Função para obter uma conexão com o banco de dados
 def get_db_connection():
@@ -391,7 +1515,6 @@ def get_db_connection():
     except Exception as e:
         logger.error(f"Erro ao conectar ao banco de dados: {str(e)}")
         return None
-
 
 # Decorator para verificar se o usuário está logado
 def login_required(f):
@@ -536,7 +1659,7 @@ def lista_fichas():
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    """Página de detalhes de uma ficha específica"""
+    """Página de detalhes de uma ficha específica com busca de produtos similares"""
     try:
         conn = get_db_connection()
         if not conn:
@@ -544,7 +1667,7 @@ def detalhes_ficha(id):
 
         cursor = conn.cursor(dictionary=True)
 
-        # Consulta SQL para obter detalhes de uma ficha específica
+        # Consulta SQL para obter detalhes da ficha
         sql = """
         SELECT
             entry_id AS id,
@@ -578,7 +1701,7 @@ def detalhes_ficha(id):
             conn.close()
             return "Ficha não encontrada", 404
 
-        # Processa informação de arquivo (imagem)
+        # Processar informação de arquivo (imagem)
         if ficha.get('arquivo'):
             try:
                 dados_serializados = ficha['arquivo'].encode('utf-8')
@@ -590,144 +1713,76 @@ def detalhes_ficha(id):
         else:
             ficha['arquivo_url'] = None
 
-        cursor.close()
-        conn.close()
+        # Buscar produtos similares usando a imagem (se disponível)
+        if ficha.get('arquivo_url'):
+            print(f"\nIniciando busca para imagem: {ficha['arquivo_url']}")
 
-        # Formatar data de compra para o formato brasileiro (se disponível)
+            finder = ProdutoFinder()
+            try:
+                produtos = finder.buscar_produtos_por_url(ficha['arquivo_url'])
+                ficha['produtos_similares'] = produtos or []  # Garante lista vazia se None
+
+                # Debug adicional
+                if not produtos:
+                    print("Nenhum produto similar encontrado")
+                else:
+                    print(f"Encontrados {len(produtos)} produtos similares")
+
+            except Exception as e:
+                print(f"Erro na busca: {str(e)}")
+                ficha['produtos_similares'] = []
+            finally:
+                finder.cleanup()
+        else:
+            ficha['produtos_similares'] = []
+            print("Nenhuma URL de imagem disponível para busca")
+
+        # ficha['produtos_similares'] = produtos_similares or []
+
+        # Cálculo do valor estimado e outras informações (com tratamento para valores nulos)
+        try:
+            valor_str = re.sub(r'[^\d,]', '', str(ficha.get('valor', '0'))).replace(',', '.')
+            valor_estimado = float(valor_str) if valor_str else 0.0
+        except (ValueError, TypeError, AttributeError):
+            valor_estimado = 0.0
+
+        # Adiciona os valores calculados à ficha
+        ficha['valorEstimado'] = valor_estimado
+        ficha['demandaMedia'] = valor_estimado * 1.05  # +5%
+        ficha['demandaAlta'] = valor_estimado * 1.10  # +10%
+
+        # Formatar data de compra para o formato brasileiro
         if ficha.get('dataDeCompra'):
             try:
                 # Tenta parsear a data para formato brasileiro
                 data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
                 ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
-            except:
+            except ValueError:
                 try:
                     # Tenta parsear caso já esteja no formato DD/MM/YYYY
-                    data_obj = datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
+                    datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
-                except:
+                except ValueError:
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
         else:
             ficha['dataDeCompra_br'] = None
 
-        # Buscar produtos similares usando a imagem (se disponível)
-        produtos_similares = []
-        if ficha.get('arquivo_url'):
-            try:
-                arquivo_url = ficha['arquivo_url']
-                logger.info(f"Buscando produtos similares para a imagem: {arquivo_url}")
+        # Garantir valores padrão para dimensões
+        ficha['altura'] = ficha.get('altura', '0')
+        ficha['largura'] = ficha.get('largura', '0')
+        ficha['profundidade'] = ficha.get('profundidade', '0')
 
-                # Configurar headers para evitar o erro 406
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
-                    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Referer': 'https://mude.ind.br/',  # Ajuste este valor para o domínio correto
-                    'Connection': 'keep-alive',
-                    'DNT': '1'
-                }
-
-                # Tenta baixar a imagem com as configurações corretas
-                response = requests.get(arquivo_url, headers=headers, timeout=30, allow_redirects=True)
-
-                # Verifica o status code
-                logger.info(f"Status code da resposta: {response.status_code}")
-
-                if response.status_code == 200:
-                    img_bytes = io.BytesIO(response.content)
-                    # Verifica se o conteúdo é realmente uma imagem
-                    try:
-                        img = Image.open(img_bytes)
-
-                        # Redimensionar a imagem para otimizar a busca
-                        max_size = (800, 800)
-                        img.thumbnail(max_size, Image.LANCZOS)
-
-                        # Busca produtos similares usando a imagem
-                        produtos_similares = finder.buscar_produtos(img)
-                        logger.info(f"Encontrados {len(produtos_similares)} produtos similares")
-                    except Exception as img_error:
-                        logger.error(f"Erro ao processar a imagem: {str(img_error)}")
-                        # Tenta um método alternativo - usar a URL diretamente
-                        try:
-                            # Fazer upload da imagem para imgbb antes de usar no Google Lens
-                            # para evitar problemas de cross-origin
-                            response_content = response.content
-                            files = {'image': ('image.jpg', response_content, 'image/jpeg')}
-                            imgbb_response = requests.post(
-                                'https://api.imgbb.com/1/upload',
-                                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
-                                files=files,
-                                timeout=30
-                            )
-
-                            if imgbb_response.status_code == 200:
-                                img_url = imgbb_response.json()['data']['url']
-                                logger.info(f"Imagem reupload com sucesso: {img_url}")
-
-                                # Criar instância temporária do ProdutoFinder
-                                temp_finder = ProdutoFinder()
-                                search_url = f"https://lens.google.com/uploadbyurl?url={img_url}"
-                                produtos_similares = temp_finder._extract_products_alternate()
-                                logger.info(f"Método alternativo encontrou {len(produtos_similares)} produtos")
-                        except Exception as alt_error:
-                            logger.error(f"Método alternativo também falhou: {str(alt_error)}")
-                else:
-                    # Se o status não for 200, tente uma abordagem alternativa
-                    logger.error(f"Falha ao baixar imagem. Status code: {response.status_code}")
-                    logger.error(f"Resposta: {response.text[:200]}...")  # Loga os primeiros 200 caracteres da resposta
-
-                    # Tenta usar a URL diretamente sem baixar a imagem
-                    try:
-                        logger.info("Tentando abordagem alternativa: usar a URL diretamente no Google Lens")
-                        # Pode ser necessário fazer upload para um serviço terceiro que não tenha restrições
-                        # ou tentar diretamente no Google Lens
-                        direct_url = ficha['arquivo_url']
-
-                        # Inicializar o driver e buscar com a URL direta
-                        if not finder._initialize_driver():
-                            logger.error("Falha ao inicializar o driver na abordagem alternativa")
-                        else:
-                            search_url = f"https://lens.google.com/uploadbyurl?url={direct_url}"
-                            finder.driver.get(search_url)
-                            time.sleep(10)  # Espera carregar
-                            produtos_similares = finder._extract_products_alternate()
-                            logger.info(f"Método direto encontrou {len(produtos_similares)} produtos")
-                    except Exception as direct_error:
-                        logger.error(f"Abordagem direta falhou: {str(direct_error)}")
-            except Exception as e:
-                logger.error(f"Erro ao buscar produtos similares: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-
-        # Cálculo do valor estimado e outras informações
-        valor_estimado = 0.0
-        if ficha.get('valor'):
-            try:
-                # Trata formatação do valor (remove símbolos como R$ e converte vírgulas para pontos)
-                valor_str = re.sub(r'[^\d,.]', '', ficha['valor']).replace(',', '.')
-                valor_estimado = float(valor_str)
-            except:
-                valor_estimado = 0.0
-
-        # Cálculo da demanda média e alta
-        demanda_media = valor_estimado + (valor_estimado * 0.05)
-        demanda_alta = valor_estimado + (valor_estimado * 0.10)
-
-        # Adiciona os valores calculados à ficha
-        ficha['valorEstimado'] = valor_estimado
-        ficha['demandaMedia'] = demanda_media
-        ficha['demandaAlta'] = demanda_alta
-        ficha['produtos_similares'] = produtos_similares
+        cursor.close()
+        conn.close()
 
         return render_template('detalhes_ficha.html', ficha=ficha)
 
-    except Exception as e:
-        logger.error(f"Erro ao exibir detalhes da ficha: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return f"Erro ao processar a solicitação: {str(e)}", 500
 
+    except Exception as e:
+
+        print(f"\nERRO GRAVE: {str(e)}")
+
+        return render_template('erro.html', mensagem="Ocorreu um erro ao processar a ficha"), 500
 
 @app.route('/atualizar_status/<int:id>', methods=['POST'])
 @login_required
