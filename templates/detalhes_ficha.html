@@ -98,6 +98,15 @@
             border-radius: 5px;
             border: 1px solid #dee2e6;
         }
+        .produto-img-container {
+            height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            overflow: hidden;
+        }
         @media (max-width: 767.98px) {
             .valor-box {
                 margin-right: 0;
@@ -110,7 +119,7 @@
     <div class="container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1>
-                Detalhes da Ficha
+                Detalhes da Ficha #{{ ficha.id }}
                 <span class="status-badge status-{{ ficha.status.lower() if ficha.status else 'analise' }}">
                     {{ ficha.status or 'Análise' }}
                 </span>
@@ -133,6 +142,20 @@
                                 <p><strong>Nome:</strong> {{ ficha.nome or 'Não informado' }}</p>
                                 <p><strong>Telefone:</strong> {{ ficha.telefone or 'Não informado' }}</p>
                                 <p><strong>Email:</strong> {{ ficha.email or 'Não informado' }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <form method="POST" action="{{ url_for('atualizar_status', id=ficha.id) }}" class="atualizar-status-form">
+                                    <div class="mb-3">
+                                        <label for="status" class="form-label"><strong>Atualizar Status:</strong></label>
+                                        <select class="form-select" id="status" name="status">
+                                            <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Análise</option>
+                                            <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
+                                            <option value="Reprovado" {% if ficha.status == 'Reprovado' %}selected{% endif %}>Reprovado</option>
+                                            <option value="Pendente" {% if ficha.status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">Salvar Status</button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -166,7 +189,7 @@
                                     </div>
                                 </div>
                                 <div class="mt-3">
-                                    <p><strong>Valor Declarado:</strong> R$ {{ ficha.valor or '0.00' }}</p>
+                                    <p><strong>Valor Declarado:</strong> R$ {{ "%.2f"|format(ficha.valor|float) if ficha.valor else '0,00' }}</p>
                                     <div class="valor-box valor-estimado">
                                         Valor Estimado: R$ {{ "%.2f"|format(ficha.valorEstimado|float) }}
                                     </div>
@@ -187,7 +210,7 @@
                             </div>
                         </div>
                     </div>
-                </div>  
+                </div>
             </div>
 
             <div class="col-md-4">
@@ -197,12 +220,12 @@
                     </div>
                     <div class="card-body text-center">
                         {% if ficha.arquivo_url %}
-                        <img src="{{ ficha.arquivo_url }}" alt="Foto do produto" class="img-fluid mb-3" style="max-height: 300px;">
-                        <a href="{{ ficha.arquivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver imagem em tamanho original</a>
+                            <img src="{{ ficha.arquivo_url }}" alt="Foto do produto" class="img-fluid mb-3" style="max-height: 300px;">
+                            <a href="{{ ficha.arquivo_url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver imagem original</a>
                         {% else %}
-                        <div class="alert alert-secondary">
-                            Nenhuma imagem disponível
-                        </div>
+                            <div class="alert alert-secondary">
+                                Nenhuma imagem disponível
+                            </div>
                         {% endif %}
                     </div>
                 </div>
@@ -231,22 +254,20 @@
                                 <div class="produto-item">
                                     <div class="row">
                                         <div class="col-4">
-                                            {% if produto.imagem %}
-                                            <img src="{{ produto.imagem }}" alt="{{ produto.nome }}" class="img-fluid">
-                                            {% else %}
-                                            <div class="text-center p-3 bg-light">
-                                                <small>Sem imagem</small>
+                                            <div class="produto-img-container">
+                                                {% if produto.img %}
+                                                <img src="{{ produto.img }}" alt="{{ produto.nome }}" class="img-fluid">
+                                                {% else %}
+                                                <small class="text-muted">Sem imagem</small>
+                                                {% endif %}
                                             </div>
-                                            {% endif %}
                                         </div>
                                         <div class="col-8">
-                                            <p class="mb-1 produto-nome"><strong>{{ produto.nome }}</strong></p>
-                                            {% if produto.preco %}
-                                            <p class="mb-1 text-success fw-bold">R$ {{ "%.2f"|format(produto.preco) }}</p>
-                                            {% else %}
-                                            <p class="mb-1 text-muted">Preço não disponível</p>
-                                            {% endif %}
-                                            <a href="{{ produto.link }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver produto</a>
+                                            <p class="mb-1 produto-nome" title="{{ produto.nome }}"><strong>{{ produto.nome }}</strong></p>
+                                            <p class="mb-1 {% if produto.preco != 'Preço não disponível' %}text-success fw-bold{% else %}text-muted{% endif %}">
+                                                {{ produto.preco }}
+                                            </p>
+                                            <a href="{{ produto.url }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver produto</a>
                                         </div>
                                     </div>
                                 </div>
@@ -275,20 +296,39 @@
             const refreshBtn = document.getElementById('refreshSimilares');
             if (refreshBtn) {
                 refreshBtn.addEventListener('click', function() {
-                    // Mostrar spinner
+                    // Mostrar spinner e esconder conteúdo
                     document.getElementById('loadingSpinner').style.display = 'block';
                     document.getElementById('produtosSimilaresContainer').style.display = 'none';
 
-                    // Recarregar a página para buscar novos produtos similares
-                    location.reload();
+                    // Opcional: Fazer uma requisição AJAX em vez de recarregar a página
+                    fetch(window.location.href, {
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                    .then(response => response.text())
+                    .then(html => {
+                        // Recarregar a página após a busca
+                        location.reload();
+                    })
+                    .catch(error => {
+                        console.error('Erro:', error);
+                        location.reload();
+                    });
                 });
             }
 
-            // Para abrir links de produtos em nova aba
-            const produtoLinks = document.querySelectorAll('.produto-item a');
-            produtoLinks.forEach(link => {
-                link.setAttribute('target', '_blank');
-                link.setAttribute('rel', 'noopener noreferrer');
+            // Melhorar a experiência de hover nos produtos similares
+            const produtoItems = document.querySelectorAll('.produto-item');
+            produtoItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON') {
+                        const link = this.querySelector('a');
+                        if (link) {
+                            window.open(link.href, '_blank');
+                        }
+                    }
+                });
             });
         });
     </script>
