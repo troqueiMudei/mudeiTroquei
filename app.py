@@ -106,6 +106,14 @@ class ProdutoFinder:
             logger.error(f"Erro na extração robusta: {str(e)}")
             return []
 
+    def _safe_extract(self, element, selector):
+        """Extrai texto de forma segura"""
+        try:
+            el = element.find_element(By.CSS_SELECTOR, selector)
+            return el.text.strip()
+        except:
+            return "Produto similar"
+
     def _safe_extract_img(self, element):
         """Extrai imagem do elemento de forma segura"""
         try:
@@ -616,18 +624,13 @@ class ProdutoFinder:
             logger.error(f"Erro na extração alternativa: {str(e)}")
             return []
 
-    def _safe_extract_attr(self, element, attr, selectors):
-        """Extrai atributo de forma segura com múltiplos seletores"""
-        for selector in selectors:
-            try:
-                el = element.find_element(By.XPATH, selector)
-                if el.is_displayed():
-                    value = el.get_attribute(attr)
-                    if value:
-                        return value
-            except:
-                continue
-        return "#"
+    def _safe_extract_attr(self, element, selector, attribute):
+        """Extrai atributo de forma segura"""
+        try:
+            el = element.find_element(By.CSS_SELECTOR, selector)
+            return el.get_attribute(attribute)
+        except:
+            return "#"
 
     def _safe_extract_text(self, element):
         """Extrai texto do elemento de forma segura"""
@@ -886,6 +889,7 @@ class ProdutoFinder:
         for attempt in range(self.max_retries):
             try:
                 chrome_options = Options()
+                chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                 chrome_options.add_argument("--headless=new")
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
@@ -994,8 +998,76 @@ class ProdutoFinder:
         except:
             return []
 
+    def _extract_products_from_current_url(self, current_url):
+        """Extrai produtos diretamente da URL atual do Google Lens"""
+        produtos = []
+
+        try:
+            # Analisar a URL para extrair parâmetros relevantes
+            parsed_url = urllib.parse.urlparse(current_url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+
+            # Se a URL contiver parâmetros de pesquisa, podemos usá-los
+            if 'url' in query_params:
+                image_url = query_params['url'][0]
+                print(f"\nExtraindo produtos para imagem: {image_url}")
+
+                # Aqui você pode implementar lógica específica baseada na URL
+                # Por exemplo, fazer uma nova busca ou parsear a página atual
+
+                # Método genérico para extrair produtos da página atual
+                produtos = self._extract_products_selenium()
+
+                # Se ainda não encontrou, tenta um fallback
+                if not produtos:
+                    produtos = self._extract_products_alternative()
+
+            return produtos
+
+        except Exception as e:
+            print(f"\nErro ao extrair produtos da URL: {str(e)}")
+            return []
+
+    def _extract_from_lens_page(self):
+        """Extrai produtos diretamente da página do Google Lens"""
+        produtos = []
+
+        try:
+            # Espera até que os resultados estejam carregados
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.srKDX.cvP2Ce"))
+            )
+
+            # Encontra o container principal
+            container = self.driver.find_element(By.CSS_SELECTOR, "div.srKDX.cvP2Ce")
+
+            # Extrai os produtos dentro do container
+            product_elements = container.find_elements(By.CSS_SELECTOR, "div.kb0PBd.cvP2Ce")[
+                               :5]  # Limita a 5 resultados
+
+            for product in product_elements:
+                try:
+                    produto = {
+                        "nome": self._safe_extract(product, "div[role='heading']"),
+                        "preco": self._safe_extract(product, "span[aria-hidden='true']"),
+                        "url": self._safe_extract_attr(product, "a", "href"),
+                        "img": self._safe_extract_attr(product, "img", "src")
+                    }
+
+                    if produto["nome"] and produto["url"]:
+                        produtos.append(produto)
+                except Exception as e:
+                    print(f"Erro ao extrair produto: {str(e)}")
+                    continue
+
+            return produtos
+
+        except Exception as e:
+            print(f"Erro na extração da página do Lens: {str(e)}")
+            return []
+
     def buscar_produtos_por_url(self, image_url):
-        """Busca produtos com melhor tratamento de erros e debug"""
+        """Busca produtos no Google Lens focando na extração direta dos elementos"""
         print(f"\n=== Iniciando busca para imagem: {image_url} ===")
 
         if not self._initialize_driver():
@@ -1010,23 +1082,12 @@ class ProdutoFinder:
             self.driver.get(search_url)
             time.sleep(8)  # Espera inicial maior
 
-            # Debug: salva a página inicial
-            self.driver.save_screenshot('initial_page.png')
+            # Capturar a URL atual após redirecionamento
+            current_url = self.driver.current_url
+            print(f"\nURL atual após redirecionamento: {current_url}")
 
-            # Tenta encontrar e clicar em "Shopping"
-            try:
-                shopping_tab = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
-                )
-                shopping_tab.click()
-                time.sleep(5)
-                print("Clicou na aba Shopping")
-            except Exception as e:
-                print(f"Não encontrou aba Shopping: {str(e)}")
-
-            # Extrai os produtos
-            produtos = self._extract_products_selenium()
+            # Extrair produtos diretamente da página do Google Lens
+            produtos = self._extract_from_lens_page()
 
             # Debug final
             print(f"\n=== Resultados encontrados ===")
@@ -1041,6 +1102,42 @@ class ProdutoFinder:
         finally:
             self.cleanup()
             print("\n=== Busca concluída ===")
+
+    def _extract_products_from_lens_url(self, lens_url):
+        """Método especializado para extrair produtos de uma URL do Google Lens"""
+        try:
+            # Parse da URL para extrair a imagem original
+            parsed = urllib.parse.urlparse(lens_url)
+            params = urllib.parse.parse_qs(parsed.query)
+            image_url = params.get('url', [None])[0]
+
+            if not image_url:
+                return []
+
+            # Inicializa o driver se necessário
+            if not self.driver and not self._initialize_driver():
+                return []
+
+            # Acessa a URL do Lens
+            self.driver.get(lens_url)
+            time.sleep(5)
+
+            # Tenta encontrar a aba Shopping
+            try:
+                shopping_tab = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Shopping')]"))
+                )
+                shopping_tab.click()
+                time.sleep(3)
+            except:
+                pass
+
+            # Extrai os produtos
+            return self._extract_products_comprehensive()
+
+        except Exception as e:
+            logger.error(f"Erro ao extrair produtos da URL do Lens: {str(e)}")
+            return []
 
     def _try_google_shopping_fallback(self, image_url):
         """Fallback direto para Google Shopping"""
@@ -1500,12 +1597,6 @@ class ProdutoFinder:
 
 
 finder = ProdutoFinder()
-# try:
-#     produtos = finder.buscar_produtos_por_url(url_da_imagem)
-#     for produto in produtos:
-#         print(f"{produto['nome']} - {produto['preco']} - {produto['url']}")
-# finally:
-#     finder.cleanup()
 
 # Função para obter uma conexão com o banco de dados
 def get_db_connection():
