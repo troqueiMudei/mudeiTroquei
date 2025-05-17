@@ -1029,7 +1029,7 @@ class ProdutoFinder:
             return []
 
     def _extract_from_lens_page(self):
-        """Extrai produtos diretamente da página do Google Lens"""
+        """Extrai produtos diretamente da página do Google Lens, filtrando links do próprio domínio"""
         produtos = []
 
         try:
@@ -1043,7 +1043,7 @@ class ProdutoFinder:
 
             # Extrai os produtos dentro do container
             product_elements = container.find_elements(By.CSS_SELECTOR, "div.kb0PBd.cvP2Ce")[
-                               :5]  # Limita a 5 resultados
+                               :10]  # Aumentei para 10 resultados
 
             for product in product_elements:
                 try:
@@ -1054,8 +1054,24 @@ class ProdutoFinder:
                         "img": self._safe_extract_attr(product, "img", "src")
                     }
 
-                    if produto["nome"] and produto["url"]:
+                    # Filtra URLs do Google Lens e outras URLs internas
+                    if (produto["nome"] and
+                            produto["url"] and
+                            not produto["url"].startswith((
+                                    "https://lens.google.com",
+                                    "http://lens.google.com",
+                                    "https://www.google.com",
+                                    "http://www.google.com"
+                            )) and
+                            not produto["url"].split('://')[1].split('/')[0].endswith(
+                                ('google.com', 'googleapis.com'))):
+
                         produtos.append(produto)
+
+                        # Limita a 5 resultados válidos após filtro
+                        if len(produtos) >= 5:
+                            break
+
                 except Exception as e:
                     print(f"Erro ao extrair produto: {str(e)}")
                     continue
