@@ -1,53 +1,33 @@
 FROM python:3.10-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-ENV CHROME_VERSION="133.0.6943.98-1"
-ENV CHROMEDRIVER_VERSION="133.0.6943.98"
+# Configurações de ambiente
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    CHROME_VERSION="120.0.6099.109-1" \
+    CHROMEDRIVER_VERSION="120.0.6099.109" \
+    CHROME_BIN=/usr/bin/google-chrome \
+    CHROME_PATH=/usr/lib/google-chrome \
+    DISPLAY=:99 \
+    CHROMEDRIVER_PATH=/usr/local/bin/chromedriver \
+    CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer --remote-debugging-port=9222" \
+    TZ=America/Sao_Paulo \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# Chrome environment setup
-ENV CHROME_BIN=/usr/bin/google-chrome
-ENV CHROME_PATH=/usr/lib/google-chrome
-ENV PYTHONPATH=/app
-ENV DISPLAY=:99
-ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
-ENV CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer"
-ENV TZ=America/Sao_Paulo
-
+# Configuração de timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Create required directories with proper permissions
-RUN mkdir -p /etc/sysctl.d /var/run/chrome /data /dev/shm /tmp/chrome && \
-    chmod 1777 /dev/shm && \
-    chmod 777 /tmp/chrome
-
-# System configurations
-RUN echo "kernel.unprivileged_userns_clone=1" > /etc/sysctl.d/00-local-userns.conf && \
-    echo "user.max_user_namespaces=10000" > /etc/sysctl.d/10-user-ns.conf
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Instalação de dependências do sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     gnupg2 \
     unzip \
     xvfb \
-    libnss3 \
-    libgconf-2-4 \
-    libfontconfig1 \
-    libxss1 \
-    libasound2 \
-    default-libmysqlclient-dev \
-    pkg-config \
-    build-essential \
-    python3-dev \
-    default-mysql-client \
-    curl \
-    libglib2.0-0 \
+    procps \  # Adicionado para suportar comandos como 'ps'
+    fonts-liberation \
     libnss3 \
     libgbm1 \
     libasound2 \
-    fonts-liberation \
-    xdg-utils \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
     libgdk-pixbuf2.0-0 \
@@ -66,47 +46,56 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libxrender1 \
     libxtst6 \
+    libglib2.0-0 \
+    default-libmysqlclient-dev \
+    pkg-config \
+    build-essential \
+    python3-dev \
+    default-mysql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome-archive-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+# Instalação do Chrome
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
-    && apt-get install -y google-chrome-stable \
+    && apt-get install -y google-chrome-stable=$CHROME_VERSION \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver
-RUN wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
-    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
-    && mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod 755 /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver.zip /usr/local/bin/chromedriver-linux64
+# Instalação do ChromeDriver
+RUN wget -q https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
+    && unzip chromedriver_linux64.zip \
+    && mv chromedriver /usr/local/bin/ \
+    && chmod +x /usr/local/bin/chromedriver \
+    && rm chromedriver_linux64.zip
 
-# Create chrome user and set up directories
+# Configuração do usuário e diretórios
 RUN useradd -m -s /bin/bash chrome_user \
-    && mkdir -p /home/chrome_user/.config/google-chrome/Default \
-    && echo '{"download_prompt_for_download": false, "download.default_directory": "/tmp/downloads"}' > /home/chrome_user/.config/google-chrome/Default/Preferences \
+    && mkdir -p /home/chrome_user/Downloads \
+    && mkdir -p /app \
     && chown -R chrome_user:chrome_user /home/chrome_user \
-    && chown -R chrome_user:chrome_user /home/chrome_user/.config \
-    && chown -R chrome_user:chrome_user /usr/local/bin/chromedriver \
-    && chown -R chrome_user:chrome_user /var/run/chrome \
-    && chown -R chrome_user:chrome_user /data \
-    && chown -R chrome_user:chrome_user /tmp/chrome \
-    && chmod -R 777 /tmp/chrome
+    && chown -R chrome_user:chrome_user /app
 
+# Configuração do workspace e instalação de dependências Python
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -U pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+COPY --chown=chrome_user:chrome_user requirements.txt .
 
-COPY . .
-RUN chown -R chrome_user:chrome_user /app
+RUN pip install --no-cache-dir -U pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Cópia dos arquivos da aplicação
+COPY --chown=chrome_user:chrome_user . .
+
+# Permissões e limpeza
+RUN chmod +x start.sh \
+    && find /usr/local/lib/python3.10 -type d -name __pycache__ -exec rm -r {} + \
+    && rm -rf /tmp/* /var/tmp/*
 
 USER chrome_user
 
-RUN chmod +x start.sh
-
 EXPOSE 8000
-ENV GUNICORN_CMD_ARGS="--workers=1 --timeout=120 --threads=4 --worker-class=gthread"
+
+# Configuração do Gunicorn (ajuste conforme necessário)
+ENV GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=1 --threads=4 --worker-class=gthread --timeout=120 --log-level=info"
 
 CMD ["./start.sh"]
