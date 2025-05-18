@@ -3,8 +3,6 @@ FROM python:3.10-slim
 # Configurações de ambiente
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    CHROME_VERSION="120.0.6099.109-1" \
-    CHROMEDRIVER_VERSION="120.0.6099.109" \
     CHROME_BIN=/usr/bin/google-chrome \
     CHROME_PATH=/usr/lib/google-chrome \
     DISPLAY=:99 \
@@ -61,15 +59,19 @@ RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-
     && apt-get update \
     && apt-get install -y /tmp/chrome.deb \
     && rm /tmp/chrome.deb \
-    && rm -rf /var/lib/apt/lists/* \
-    && google-chrome --version
+    && rm -rf /var/lib/apt/lists/*
 
-# Instalação do ChromeDriver
-RUN wget -q https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
-    && unzip chromedriver_linux64.zip \
-    && mv chromedriver /usr/local/bin/ \
+# Obter versão do Chrome instalado e configurar automaticamente ChromeDriver correspondente
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d. -f1-3) \
+    && echo "Versão do Chrome: $CHROME_VERSION" \
+    && CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION") \
+    && echo "Versão do ChromeDriver: $CHROMEDRIVER_VERSION" \
+    && wget -q -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
+    && unzip /tmp/chromedriver.zip -d /tmp/ \
+    && mv /tmp/chromedriver /usr/local/bin/chromedriver \
     && chmod +x /usr/local/bin/chromedriver \
-    && rm chromedriver_linux64.zip
+    && rm /tmp/chromedriver.zip \
+    && chromedriver --version
 
 # Configuração do usuário e diretórios
 RUN useradd -m -s /bin/bash chrome_user \
