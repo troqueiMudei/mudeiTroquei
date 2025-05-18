@@ -4,11 +4,10 @@
 Xvfb :99 -screen 0 1280x1024x24 &
 export DISPLAY=:99
 
-# Verifica dependências
-echo "=== Dependências verificadas ==="
-google-chrome --version || exit 1
-chromedriver --version || exit 1
-python --version || exit 1
+# Verifica versões instaladas
+echo "=== Versões instaladas ==="
+google-chrome --version || { echo "Chrome não instalado corretamente"; exit 1; }
+chromedriver --version || { echo "ChromeDriver não instalado corretamente"; exit 1; }
 
 # Configura variáveis críticas
 export SELENIUM_DISABLE_MANAGER=1
@@ -20,6 +19,4 @@ exec gunicorn app:app \
     --workers 1 \
     --threads 4 \
     --timeout 120 \
-    --log-level debug \
-    --access-logfile - \
-    --error-logfile -
+    --log-level debug
