@@ -1,6 +1,5 @@
 FROM python:3.10-slim
 
-
 # Environment configuration
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -23,18 +22,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome (latest stable version)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/* \
     && google-chrome-stable --version
 
-# Install matching Chromedriver
-RUN CHROME_VERSION=$(google-chrome-stable --version | awk '{print $3}') \
-    && CHROME_MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d'.' -f1) \
-    && CHROMEDRIVER_VERSION=$(wget -q -O - "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_MAJOR_VERSION") \
-    && wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" \
+# Install Chromedriver (versão específica compatível)
+# Versão do Chrome: 125.0.6422.141
+# Chromedriver correspondente: 125.0.6422.78
+RUN wget -q https://chromedriver.storage.googleapis.com/125.0.6422.78/chromedriver_linux64.zip \
     && unzip chromedriver_linux64.zip \
     && mv chromedriver /usr/bin/ \
     && chmod +x /usr/bin/chromedriver \
