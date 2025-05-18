@@ -15,21 +15,12 @@ log "ChromeDriver: $(chromedriver --version || echo 'NOT FOUND')"
 log "Python: $(python --version)"
 log "Gunicorn: $(gunicorn --version || echo 'NOT FOUND')"
 
-# 2. Verify version compatibility
-CHROME_MAJOR=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
-DRIVER_MAJOR=$(chromedriver --version | awk '{print $2}' | cut -d'.' -f1)
-
-if [ "$CHROME_MAJOR" != "$DRIVER_MAJOR" ]; then
-    log "ERROR: Version mismatch - Chrome v$CHROME_MAJOR != ChromeDriver v$DRIVER_MAJOR"
-    exit 1
-fi
-
-# 3. Start Xvfb
+# 2. Start Xvfb
 log "Starting Xvfb..."
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
 export DISPLAY=:99
 
-# 4. Verify Selenium setup
+# 3. Verify Selenium setup
 log "Testing ChromeDriver..."
 python -c "
 from selenium import webdriver
@@ -53,7 +44,7 @@ except Exception as e:
     raise
 "
 
-# 5. Start application
+# 4. Start application
 log "Starting application..."
 exec gunicorn app:app \
     --bind 0.0.0.0:8000 \
