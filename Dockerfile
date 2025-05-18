@@ -1,5 +1,7 @@
 FROM python:3.10-slim
 
+FROM python:3.10-slim
+
 # Environment configuration
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -17,19 +19,19 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install specific Chrome version (114.0.5735.198)
-RUN wget -q -O chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_114.0.5735.198-1_amd64.deb" \
-    && apt-get update \
-    && apt-get install -y ./chrome.deb \  # Fixed: Changed from chrome.def to chrome.deb
-    && rm chrome.deb \
-    && google-chrome --version
+RUN wget -q -O chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_114.0.5735.198-1_amd64.deb" && \
+    apt-get update && \
+    apt-get install -y ./chrome.deb && \
+    rm chrome.deb && \
+    google-chrome --version
 
 # Install matching ChromeDriver (114.0.5735.90)
-RUN wget -q "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip" \
-    && unzip chromedriver_linux64.zip \
-    && mv chromedriver /usr/bin/ \
-    && chmod +x /usr/bin/chromedriver \
-    && rm chromedriver_linux64.zip \
-    && chromedriver --version
+RUN wget -q "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip" && \
+    unzip chromedriver_linux64.zip && \
+    mv chromedriver /usr/bin/ && \
+    chmod +x /usr/bin/chromedriver && \
+    rm chromedriver_linux64.zip && \
+    chromedriver --version
 
 # Create non-root user
 RUN useradd -m appuser && mkdir /app && chown appuser:appuser /app
