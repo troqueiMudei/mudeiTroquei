@@ -53,14 +53,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     default-mysql-client \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalação do Chrome
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+# Instalação do Chrome (método atualizado)
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
-    && apt-get install -y google-chrome-stable=$CHROME_VERSION \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y /tmp/chrome.deb \
+    && rm /tmp/chrome.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && google-chrome --version
 
 # Instalação do ChromeDriver
 RUN wget -q https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
