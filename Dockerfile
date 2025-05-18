@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome (versão específica compatível com o Chromedriver disponível)
+# Install Chrome (versão específica)
 RUN CHROME_VERSION="136.0.7103.113" && \
     wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
@@ -30,9 +30,11 @@ RUN CHROME_VERSION="136.0.7103.113" && \
     rm -rf /var/lib/apt/lists/* && \
     google-chrome-stable --version
 
-# Install Chromedriver (versão correspondente ao Chrome 136)
+# Install Chromedriver com múltiplos fallbacks
 RUN CHROMEDRIVER_VERSION="136.0.7103.91" && \
-    wget -q https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip && \
+    (wget -q https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip || \
+     wget -q https://npm.taobao.org/mirrors/chromedriver/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip || \
+     wget -q https://registry.npmmirror.com/-/binary/chromedriver/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip) && \
     unzip chromedriver_linux64.zip && \
     mv chromedriver /usr/bin/ && \
     chmod +x /usr/bin/chromedriver && \
