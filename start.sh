@@ -1,41 +1,36 @@
 #!/bin/bash
 
-# Configurações de ambiente
+# Enable strict error checking
 set -eo pipefail
 
-# Função para log
+# Logging function
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# 1. Verificação de dependências
-log "Verificando dependências..."
-check_dep() {
-    if ! command -v $1 >/dev/null 2>&1; then
-        log "ERRO: $1 não encontrado no PATH"
-        exit 1
-    fi
-    log "$1 encontrado: $(which $1)"
-}
+# 1. Verify installations
+log "=== System Verification ==="
+log "Chrome: $(google-chrome --version || echo 'NOT FOUND')"
+log "ChromeDriver: $(chromedriver --version || echo 'NOT FOUND')"
+log "Python: $(python --version)"
+log "Gunicorn: $(gunicorn --version || echo 'NOT FOUND')"
 
-check_dep "google-chrome"
-check_dep "chromedriver"
-check_dep "python"
-check_dep "gunicorn"
+# 2. Verify version compatibility
+CHROME_MAJOR=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
+DRIVER_MAJOR=$(chromedriver --version | awk '{print $2}' | cut -d'.' -f1)
 
-# 2. Configuração do Xvfb
-log "Configurando Xvfb..."
-Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 &
+if [ "$CHROME_MAJOR" != "$DRIVER_MAJOR" ]; then
+    log "ERROR: Version mismatch - Chrome v$CHROME_MAJOR != ChromeDriver v$DRIVER_MAJOR"
+    exit 1
+fi
+
+# 3. Start Xvfb
+log "Starting Xvfb..."
+Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
 export DISPLAY=:99
 
-# 3. Configuração do ChromeDriver
-log "Configurando ambiente Selenium..."
-export CHROME_BIN="/usr/bin/google-chrome"
-export CHROMEDRIVER_PATH="/usr/bin/chromedriver"
-export WEBDRIVER_CHROME_OPTIONS="--no-sandbox --disable-dev-shm-usage --disable-gpu --headless"
-
-# 4. Teste do ChromeDriver
-log "Testando ChromeDriver..."
+# 4. Verify Selenium setup
+log "Testing ChromeDriver..."
 python -c "
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -51,15 +46,15 @@ options.add_argument('--remote-debugging-port=9222')
 try:
     driver = webdriver.Chrome(options=options)
     driver.get('https://www.google.com')
-    print('✅ ChromeDriver testado com sucesso')
+    print('✅ ChromeDriver test successful')
     driver.quit()
 except Exception as e:
-    print(f'❌ Falha no ChromeDriver: {e}')
+    print(f'❌ ChromeDriver test failed: {e}')
     raise
 "
 
-# 5. Inicialização do Gunicorn
-log "Iniciando aplicação..."
+# 5. Start application
+log "Starting application..."
 exec gunicorn app:app \
     --bind 0.0.0.0:8000 \
     --workers 1 \
