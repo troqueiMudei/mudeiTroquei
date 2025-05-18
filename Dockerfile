@@ -21,23 +21,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome (latest stable version)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/* \
-    && google-chrome-stable --version
+# Install Chrome (versão específica compatível com o Chromedriver disponível)
+RUN CHROME_VERSION="136.0.7103.113" && \
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends google-chrome-stable=${CHROME_VERSION}-1 && \
+    rm -rf /var/lib/apt/lists/* && \
+    google-chrome-stable --version
 
-# Install Chromedriver (versão específica compatível)
-# Versão do Chrome: 125.0.6422.141
-# Chromedriver correspondente: 125.0.6422.78
-RUN wget -q https://chromedriver.storage.googleapis.com/125.0.6422.78/chromedriver_linux64.zip \
-    && unzip chromedriver_linux64.zip \
-    && mv chromedriver /usr/bin/ \
-    && chmod +x /usr/bin/chromedriver \
-    && rm chromedriver_linux64.zip \
-    && chromedriver --version
+# Install Chromedriver (versão correspondente ao Chrome 136)
+RUN CHROMEDRIVER_VERSION="136.0.7103.91" && \
+    wget -q https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip && \
+    unzip chromedriver_linux64.zip && \
+    mv chromedriver /usr/bin/ && \
+    chmod +x /usr/bin/chromedriver && \
+    rm chromedriver_linux64.zip && \
+    chromedriver --version
 
 # Create non-root user
 RUN useradd -m appuser && mkdir /app && chown appuser:appuser /app
