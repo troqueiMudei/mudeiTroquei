@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     xvfb \
     procps \
-    fonts-liberation
+    fonts-liberation \
     libnss3 \
     libgbm1 \
     libasound2 \
