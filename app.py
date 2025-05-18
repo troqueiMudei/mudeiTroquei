@@ -855,43 +855,31 @@ class ProdutoFinder:
         if self.driver:
             return True
 
-        for attempt in range(self.max_retries):
-            try:
-                chrome_options = Options()
-                chrome_options.add_argument("--no-sandbox")
-                chrome_options.add_argument("--disable-dev-shm-usage")
-                chrome_options.add_argument("--remote-debugging-port=9222")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--window-size=1280,720")
-                chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
+        chrome_options = Options()
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--window-size=1280,720")
+        chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
 
-                # Forçar a versão específica do Chrome
-                chrome_options.binary_location = "/usr/bin/google-chrome"
+        # Configuração explícita do ChromeDriver
+        service = Service(
+            executable_path='/usr/local/bin/chromedriver',
+            service_args=['--verbose'],
+            log_path='chromedriver.log'
+        )
 
-                # Desativar o gerenciamento automático de versões
-                os.environ['WDM_LOCAL'] = '1'
-                os.environ['WDM_SSL_VERIFY'] = '0'
-
-                service = Service(
-                    executable_path="/usr/local/bin/chromedriver",
-                    service_args=['--verbose'],
-                    log_path='chromedriver.log'
-                )
-
-                self.driver = webdriver.Chrome(
-                    service=service,
-                    options=chrome_options
-                )
-
-                self.driver.set_page_load_timeout(30)
-                return True
-
-            except Exception as e:
-                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                if attempt == self.max_retries - 1:
-                    logger.error("Falha ao inicializar após múltiplas tentativas")
-                    return False
-                time.sleep(2)
+        try:
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
+            self.driver.set_page_load_timeout(30)
+            return True
+        except Exception as e:
+            logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
+            return False
 
     def buscar_produtos_alternativo(self, image_url):
         """Método alternativo usando APIs de pesquisa por imagem"""

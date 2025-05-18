@@ -47,6 +47,23 @@ echo "Versões instaladas:"
 google-chrome --version
 chromedriver --version
 
+echo "=== Versões instaladas ==="
+google-chrome --version
+chromedriver --version
+
+# Configurar Xvfb
+Xvfb :99 -screen 0 1280x1024x24 &
+export DISPLAY=:99
+
+# Iniciar a aplicação
+exec gunicorn app:app \
+    --bind 0.0.0.0:8000 \
+    --workers 1 \
+    --threads 4 \
+    --worker-class gthread \
+    --timeout 120 \
+    --log-level info
+
 # Iniciar a aplicação
 echo "Iniciando a aplicação..."
 exec gunicorn app:app \
