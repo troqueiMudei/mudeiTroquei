@@ -29,14 +29,22 @@ USER appuser
 # 4. Copia APENAS o requirements.txt primeiro
 COPY --chown=appuser:appuser requirements.txt .
 
-# 5. Instala dependências Python
+# 5. Instala dependências Python GLOBALMENTE (como root temporariamente)
+USER root
+RUN pip install --no-cache-dir gunicorn==20.1.0
+USER appuser
+
+# 6. Instala outras dependências no user space
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# 6. Copia o restante dos arquivos (incluindo start.sh)
+# 7. Copia o restante dos arquivos
 COPY --chown=appuser:appuser . .
 
-# 7. Agora sim, define permissões para o start.sh
+# 8. Garante permissões
 RUN chmod +x start.sh
 
-# 8. Ponto de entrada
+# 9. Configura PATH para incluir .local/bin
+ENV PATH="/home/appuser/.local/bin:${PATH}"
+
+# 10. Ponto de entrada
 CMD ["./start.sh"]
