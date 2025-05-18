@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg2 \
     unzip \
     xvfb \
-    procps \  # Adicionado para suportar comandos como 'ps'
-    fonts-liberation \
+    procps \
+    fonts-liberation
     libnss3 \
     libgbm1 \
     libasound2 \
