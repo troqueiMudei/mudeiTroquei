@@ -7,11 +7,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CHROME_PATH=/usr/lib/google-chrome \
     DISPLAY=:99 \
     CHROMEDRIVER_PATH=/usr/local/bin/chromedriver \
-    CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer --remote-debugging-port=9222" \
+    CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --remote-debugging-port=9222" \
     TZ=America/Sao_Paulo \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    FLASK_DEBUG=0
+    FLASK_DEBUG=0 \
+    WDM_LOCAL=1 \
+    WDM_SSL_VERIFY=0
 
 # Configuração de timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -55,31 +57,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Instalação específica do Chrome versão 114
-RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_114.0.5735.198-1_amd64.deb \
+# Instalação do Chrome versão estável mais recente
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
-    && apt-get install -y /tmp/chrome.deb \
-    && rm /tmp/chrome.deb \
+    && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/* \
     && google-chrome --version
 
-# Instalação específica do ChromeDriver 114.0.5735.90
-RUN wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip \
+# Instalação do ChromeDriver compatível
+# Verifica a versão do Chrome instalada e instala o ChromeDriver correspondente
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1) \
+    && echo "Chrome version: $CHROME_VERSION" \
+    && CHROMEDRIVER_VERSION=$(wget -q -O - https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}) \
+    && echo "Installing ChromeDriver version: $CHROMEDRIVER_VERSION" \
+    && wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip \
     && unzip -q /tmp/chromedriver_linux64.zip -d /tmp/ \
     && mv /tmp/chromedriver /usr/local/bin/chromedriver \
     && chmod +x /usr/local/bin/chromedriver \
     && rm /tmp/chromedriver_linux64.zip \
     && chromedriver --version
-
-# Instalação do ChromeDriver
-RUN LATEST_RELEASE=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE) \
-    && echo "Baixando ChromeDriver versão: ${LATEST_RELEASE}" \
-    && wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/${LATEST_RELEASE}/chromedriver_linux64.zip \
-    && unzip -q /tmp/chromedriver_linux64.zip -d /tmp/ \
-    && mv /tmp/chromedriver /usr/local/bin/chromedriver \
-    && chmod +x /usr/local/bin/chromedriver \
-    && rm /tmp/chromedriver_linux64.zip
 
 # Configuração do usuário e diretórios
 RUN useradd -m -s /bin/bash appuser \

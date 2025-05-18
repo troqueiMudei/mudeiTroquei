@@ -13,6 +13,7 @@ test_db_connection() {
           -e "SHOW STATUS LIKE 'Uptime';" "$DB_NAME" >/dev/null 2>&1
     return $?
 }
+
 # Aguardar MySQL ficar disponível
 if [ -n "$DB_HOST" ]; then
     while [ $ATTEMPT -le $MAX_DB_RETRIES ]; do
@@ -32,13 +33,19 @@ if [ -n "$DB_HOST" ]; then
     done
 fi
 
-# Iniciar Xvfb no background
-Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-
-# Exportar variáveis de ambiente necessárias
+# Configurar ambiente para o Chrome
 export DISPLAY=:99
 export CHROME_BIN=/usr/bin/google-chrome
 export CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
+export CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222"
+
+# Iniciar Xvfb no background
+Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 &
+
+# Verificar versões instaladas
+echo "Versões instaladas:"
+google-chrome --version
+chromedriver --version
 
 # Iniciar a aplicação
 echo "Iniciando a aplicação..."
