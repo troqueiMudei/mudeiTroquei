@@ -55,13 +55,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalação do Chrome
-RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+
+# Instalação específica do Chrome versão 114
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_114.0.5735.198-1_amd64.deb \
     && apt-get update \
     && apt-get install -y /tmp/chrome.deb \
     && rm /tmp/chrome.deb \
     && rm -rf /var/lib/apt/lists/* \
     && google-chrome --version
+
+# Instalação específica do ChromeDriver 114.0.5735.90
+RUN wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip \
+    && unzip -q /tmp/chromedriver_linux64.zip -d /tmp/ \
+    && mv /tmp/chromedriver /usr/local/bin/chromedriver \
+    && chmod +x /usr/local/bin/chromedriver \
+    && rm /tmp/chromedriver_linux64.zip \
+    && chromedriver --version
 
 # Instalação do ChromeDriver
 RUN LATEST_RELEASE=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE) \

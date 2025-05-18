@@ -728,58 +728,17 @@ class ProdutoFinder:
             return None
 
     def buscar_produtos_por_imagem(self, image_url):
-        """Busca produtos similares por URL de imagem (execução em background)"""
-        produtos = []
+        """Busca produtos similares por URL de imagem com fallback"""
+        logger.info(f"Iniciando busca para imagem: {image_url}")
 
-        try:
-            # 1. Processa a imagem
-            logger.info("Processando imagem...")
-            img_buffer = self._process_image(image_url)
-            if not img_buffer:
-                return []
+        # Primeiro tenta com Selenium
+        produtos = self._buscar_com_selenium(image_url)
 
-            # 2. Faz upload da imagem otimizada
-            logger.info("Fazendo upload da imagem...")
-            uploaded_url = self._upload_image(img_buffer)
-            if not uploaded_url:
-                return []
+        if not produtos:
+            logger.info("Nenhum produto encontrado via Selenium, tentando API alternativa")
+            produtos = self.buscar_produtos_alternativo(image_url)
 
-            # 3. Inicializa o driver em modo headless
-            if not self._initialize_driver():
-                return []
-
-            # 4. Executa a busca no Google Lens
-            logger.info("Executando busca no Google Lens...")
-            lens_url = f"https://lens.google.com/uploadbyurl?url={urllib.parse.quote(uploaded_url)}"
-            self.driver.get(lens_url)
-
-            # Espera carregar e tenta acessar a aba Shopping
-            time.sleep(8)
-            try:
-                shopping_tab = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Shopping')]"))
-                )
-                shopping_tab.click()
-                time.sleep(5)
-            except:
-                logger.warning("Não encontrou a aba Shopping, continuando...")
-
-            # 5. Extrai os produtos
-            produtos = self._extrair_produtos_avancado()
-
-            # Debug: salva screenshot e HTML para análise
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.driver.save_screenshot(f"debug_{timestamp}.png")
-            with open(f"page_source_{timestamp}.html", "w") as f:
-                f.write(self.driver.page_source)
-
-            return produtos[:5]  # Limita a 5 resultados
-
-        except Exception as e:
-            logger.error(f"Erro na busca por imagem: {str(e)}")
-            return []
-        finally:
-            self.cleanup()
+        return produtos[:5]  # Limita a 5 resultados
 
     def _extrair_produtos_avancado(self):
         """Método robusto para extração de produtos com múltiplas estratégias"""
@@ -899,68 +858,73 @@ class ProdutoFinder:
         for attempt in range(self.max_retries):
             try:
                 chrome_options = Options()
-                chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-                chrome_options.add_argument("--headless=new")
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--remote-debugging-port=9222")
                 chrome_options.add_argument("--disable-gpu")
                 chrome_options.add_argument("--window-size=1280,720")
                 chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
-                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                chrome_options.add_experimental_option("useAutomationExtension", False)
 
-                # Configuração específica para Linux
-                chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+                # Forçar a versão específica do Chrome
+                chrome_options.binary_location = "/usr/bin/google-chrome"
 
-                # Solução para o erro do WebDriverManager
-                try:
-                    from selenium.webdriver.chrome.service import Service as ChromeService
-                    service = ChromeService(
-                        executable_path=ChromeDriverManager().install(),
-                        service_args=['--verbose'],
-                        log_path='chromedriver.log'
-                    )
-                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                except:
-                    # Fallback para quando o WebDriverManager falha
-                    self.driver = webdriver.Chrome(options=chrome_options)
+                # Desativar o gerenciamento automático de versões
+                os.environ['WDM_LOCAL'] = '1'
+                os.environ['WDM_SSL_VERIFY'] = '0'
+
+                service = Service(
+                    executable_path="/usr/local/bin/chromedriver",
+                    service_args=['--verbose'],
+                    log_path='chromedriver.log'
+                )
+
+                self.driver = webdriver.Chrome(
+                    service=service,
+                    options=chrome_options
+                )
 
                 self.driver.set_page_load_timeout(30)
                 return True
 
             except Exception as e:
-                print(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt == self.max_retries - 1:
-                    print("Falha ao inicializar após múltiplas tentativas")
+                    logger.error("Falha ao inicializar após múltiplas tentativas")
                     return False
                 time.sleep(2)
 
     def buscar_produtos_alternativo(self, image_url):
-        """Método alternativo usando pesquisa por texto"""
+        """Método alternativo usando APIs de pesquisa por imagem"""
         try:
-            if not self._initialize_driver():
+            # 1. Upload da imagem para um serviço temporário
+            uploaded_url = self._upload_image_to_temp_service(image_url)
+            if not uploaded_url:
                 return []
 
-            # 1. Tentar extrair características da imagem para criar termos de busca
-            search_terms = self._generate_search_terms(image_url)
+            # 2. Usar o SerpAPI para pesquisa por imagem
+            params = {
+                "engine": "google_lens",
+                "url": uploaded_url,
+                "api_key": os.getenv("SERPAPI_KEY")
+            }
 
-            # 2. Fazer busca no Google Shopping
-            for term in search_terms[:3]:  # Tentar os 3 primeiros termos
-                try:
-                    url = f"https://www.google.com/search?tbm=shop&q={urllib.parse.quote(term)}"
-                    self.driver.get(url)
+            response = requests.get("https://serpapi.com/search", params=params)
+            results = response.json().get("visual_matches", [])
 
-                    # Extrair produtos
-                    produtos = self._extract_products_comprehensive()
-                    if produtos:
-                        return produtos
-                except Exception as e:
-                    logger.warning(f"Busca por '{term}' falhou: {str(e)}")
-                    continue
+            produtos = []
+            for item in results[:5]:  # Limitar a 5 resultados
+                produtos.append({
+                    "nome": item.get("title", "Produto similar"),
+                    "preco": item.get("price", "Preço não disponível"),
+                    "url": item.get("link", "#"),
+                    "img": item.get("thumbnail", "")
+                })
 
+            return produtos
+
+        except Exception as e:
+            logger.error(f"Erro na busca alternativa: {str(e)}")
             return []
-        finally:
-            self.cleanup()
 
     def _generate_search_terms(self, image_url):
         """Gera termos de busca baseados na imagem"""
