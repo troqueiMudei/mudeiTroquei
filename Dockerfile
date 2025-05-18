@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 # Install specific Chrome version (114.0.5735.198)
 RUN wget -q -O chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_114.0.5735.198-1_amd64.deb" \
     && apt-get update \
-    && apt-get install -y ./chrome.def \
+    && apt-get install -y ./chrome.deb \  # Fixed: Changed from chrome.def to chrome.deb
     && rm chrome.deb \
     && google-chrome --version
 
