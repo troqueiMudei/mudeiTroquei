@@ -54,24 +54,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalação do Chrome (método atualizado)
+# Instalação do Chrome (usando versão estável mais recente)
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y /tmp/chrome.deb \
     && rm /tmp/chrome.deb \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && google-chrome --version
 
-# Obter versão do Chrome instalado e configurar automaticamente ChromeDriver correspondente
-RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d. -f1-3) \
-    && echo "Versão do Chrome: $CHROME_VERSION" \
-    && CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION") \
-    && echo "Versão do ChromeDriver: $CHROMEDRIVER_VERSION" \
-    && wget -q -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
-    && unzip /tmp/chromedriver.zip -d /tmp/ \
+# Instalação de ChromeDriver estável diretamente do GitHub
+RUN LATEST_RELEASE=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE) \
+    && echo "Baixando ChromeDriver versão: ${LATEST_RELEASE}" \
+    && wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/${LATEST_RELEASE}/chromedriver_linux64.zip \
+    && unzip -q /tmp/chromedriver_linux64.zip -d /tmp/ \
     && mv /tmp/chromedriver /usr/local/bin/chromedriver \
     && chmod +x /usr/local/bin/chromedriver \
-    && rm /tmp/chromedriver.zip \
-    && chromedriver --version
+    && rm /tmp/chromedriver_linux64.zip
 
 # Configuração do usuário e diretórios
 RUN useradd -m -s /bin/bash chrome_user \
