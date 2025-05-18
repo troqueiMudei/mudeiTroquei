@@ -1,30 +1,26 @@
 FROM python:3.10-slim
 
-# Configurações essenciais
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    DISPLAY=:99 \
-    CHROME_BIN=/usr/bin/google-chrome \
-    CHROMEDRIVER_PATH=/usr/bin/chromedriver \
-    SELENIUM_DISABLE_MANAGER=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PATH="/home/appuser/.local/bin:${PATH}"
+# Ativa modo debug
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    DEBUG_MODE=1
 
-# Instala dependências básicas
+# Instala dependências de sistema + ferramentas de diagnóstico
 RUN apt-get update && apt-get install -y \
     wget gnupg unzip xvfb \
     fonts-liberation libnss3 libgbm1 libasound2 \
     libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 \
+    curl procps lsof net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala Chrome Stable
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
+# Instala Chrome via repositório oficial
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/googlechrome-linux-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && google-chrome --version
 
-# Instala ChromeDriver (versão fixa compatível)
+# Instala ChromeDriver 114.0.5735.90 (versão estável)
 RUN wget -q https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip \
     && unzip chromedriver_linux64.zip \
     && mv chromedriver /usr/bin/ \
@@ -41,8 +37,8 @@ USER appuser
 COPY --chown=appuser:appuser requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Copia a aplicação
+# Copia aplicação
 COPY --chown=appuser:appuser . .
 
-# Script de inicialização
-CMD ["./start.sh"]
+# Script de inicialização com diagnóstico
+CMD ["sh", "-c", "./start.sh && tail -f /dev/null"]  # Mantém container vivo para inspeção
