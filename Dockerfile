@@ -37,6 +37,12 @@ USER appuser
 COPY --chown=appuser:appuser requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
+# Garante permissões corretas para o start.sh
+RUN chmod +x start.sh
+
+# Copia a aplicação
+COPY --chown=appuser:appuser . .
+
 # Copia aplicação
 COPY --chown=appuser:appuser . .
 
