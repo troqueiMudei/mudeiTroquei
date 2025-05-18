@@ -43,7 +43,14 @@ DB_CONFIG = {
     'port': int(os.getenv('DB_PORT', '3306')),
     'user': os.getenv('DB_USER', 'mudeit26_teste'),
     'password': os.getenv('DB_PASSWORD', 'teste2025@'),
-    'database': os.getenv('DB_NAME', 'mudeit26_site')
+    'database': os.getenv('DB_NAME', 'mudeit26_site'),
+    'connection_timeout': 30,
+    'connect_timeout': 30,
+    'consume_results': True,
+    'autocommit': True,
+    'pool_name': 'web_pool',
+    'pool_size': 5,
+    'pool_reset_session': True
 }
 
 
@@ -1625,11 +1632,24 @@ def get_db_connection():
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1} de conexão com o MySQL em {DB_CONFIG['host']}")
-            connection = mysql.connector.connect(**DB_CONFIG)
 
-            # Testar a conexão
-            cursor = connection.cursor()
+            # Adicionando parâmetros para evitar "Unread result found"
+            connection = mysql.connector.connect(
+                host=DB_CONFIG['host'],
+                port=DB_CONFIG['port'],
+                user=DB_CONFIG['user'],
+                password=DB_CONFIG['password'],
+                database=DB_CONFIG['database'],
+                connection_timeout=30,
+                connect_timeout=30,
+                consume_results=True,  # Importante para evitar "Unread result found"
+                autocommit=True
+            )
+
+            # Teste de conexão mais robusto
+            cursor = connection.cursor(buffered=True)  # Usando cursor buffered
             cursor.execute("SELECT 1")
+            cursor.fetchall()  # Garantindo que todos os resultados são lidos
             cursor.close()
 
             logger.info("Conexão com MySQL estabelecida com sucesso")
@@ -1637,8 +1657,14 @@ def get_db_connection():
 
         except mysql.connector.Error as err:
             logger.error(f"Erro ao conectar ao MySQL (tentativa {attempt + 1}): {err}")
+            if err.errno == mysql.connector.errorcode.ER_UNKNOWN_ERROR and "Unread result found" in str(err):
+                logger.warning("Tentando reconectar após 'Unread result found'...")
+                time.sleep(retry_delay)
+                continue
+
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
+
         except Exception as e:
             logger.error(f"Erro inesperado ao conectar ao MySQL: {str(e)}")
             if attempt < max_retries - 1:
@@ -1646,6 +1672,7 @@ def get_db_connection():
 
     logger.error("Falha ao conectar ao MySQL após várias tentativas")
     return None
+
     # Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)

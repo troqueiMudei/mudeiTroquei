@@ -8,10 +8,11 @@ ATTEMPT=1
 # Função para testar conexão com o MySQL
 test_db_connection() {
     echo "Tentando conectar ao MySQL (tentativa $ATTEMPT/$MAX_DB_RETRIES)..."
-    mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" "$DB_NAME" >/dev/null 2>&1
+    mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" \
+          --connect-timeout=30 \
+          -e "SHOW STATUS LIKE 'Uptime';" "$DB_NAME" >/dev/null 2>&1
     return $?
 }
-
 # Aguardar MySQL ficar disponível
 if [ -n "$DB_HOST" ]; then
     while [ $ATTEMPT -le $MAX_DB_RETRIES ]; do
