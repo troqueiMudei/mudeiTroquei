@@ -1,15 +1,25 @@
 #!/bin/bash
 
 # Configura Xvfb
-Xvfb :99 -screen 0 1280x1024x24 &
+Xvfb :99 -screen 0 1280x1024x24 -ac +extension GLX +render -noreset &
 export DISPLAY=:99
 
-# Verifica instalações
+# Verifica dependências críticas
 echo "=== Verificando dependências ==="
-/usr/bin/google-chrome --version || exit 1
-/usr/bin/chromedriver --version || exit 1
+if ! command -v google-chrome &> /dev/null; then
+    echo "❌ Chrome não encontrado"
+    exit 1
+fi
 
-# Configurações adicionais
+if ! command -v chromedriver &> /dev/null; then
+    echo "❌ ChromeDriver não encontrado"
+    exit 1
+fi
+
+echo "✅ Chrome $(google-chrome --version)"
+echo "✅ ChromeDriver $(chromedriver --version)"
+
+# Configura variáveis de ambiente adicionais
 export SELENIUM_DISABLE_MANAGER=1
 
 # Inicia a aplicação
@@ -18,4 +28,6 @@ exec gunicorn app:app \
     --workers 1 \
     --threads 4 \
     --timeout 120 \
-    --log-level debug
+    --log-level info \
+    --access-logfile - \
+    --error-logfile -
