@@ -1,81 +1,52 @@
 #!/bin/bash
-set -eo pipefail
 
 # Configurações
-XVFB_DISPLAY=":99"
-SCREEN_RESOLUTION="1920x1080x24"
-MYSQL_HOST="viaduct.proxy.rlwy.net"
-MYSQL_PORT="24171"
-MYSQL_USER="root"
-MYSQL_PASSWORD="SOiZeRqyiKiUqqCIcdMrGncUJzzRrIji"
-MAX_RETRIES=30
-RETRY_DELAY=2
+MAX_DB_RETRIES=30
+RETRY_INTERVAL=5
+ATTEMPT=1
 
-# Iniciar Xvfb com configurações otimizadas
-Xvfb $XVFB_DISPLAY -screen 0 $SCREEN_RESOLUTION \
-  -ac \
-  +extension RANDR \
-  +extension GLX \
-  +extension MIT-SHM \
-  -nolisten tcp \
-  > /dev/null 2>&1 &
-export DISPLAY=$XVFB_DISPLAY
-
-# Função para testar conexão MySQL com timeout
-test_mysql_connection() {
-    timeout 5 mysqladmin ping \
-        -h"$MYSQL_HOST" \
-        -P"$MYSQL_PORT" \
-        -u"$MYSQL_USER" \
-        -p"$MYSQL_PASSWORD" \
-        --silent || return 1
+# Função para testar conexão com o MySQL
+test_db_connection() {
+    echo "Tentando conectar ao MySQL (tentativa $ATTEMPT/$MAX_DB_RETRIES)..."
+    mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" "$DB_NAME" >/dev/null 2>&1
+    return $?
 }
 
-# Esperar pelo MySQL com tratamento de erro melhorado
-echo "Waiting for MySQL to become available..."
-retry_count=0
-while [ $retry_count -lt $MAX_RETRIES ]; do
-    if test_mysql_connection; then
-        echo "MySQL is available!"
-        break
-    else
-        retry_count=$((retry_count+1))
-        echo "Waiting for MySQL connection... (attempt $retry_count/$MAX_RETRIES)"
-        sleep $RETRY_DELAY
-    fi
-done
+# Aguardar MySQL ficar disponível
+if [ -n "$DB_HOST" ]; then
+    while [ $ATTEMPT -le $MAX_DB_RETRIES ]; do
+        if test_db_connection; then
+            echo "Conexão com MySQL estabelecida com sucesso!"
+            break
+        fi
 
-if [ $retry_count -eq $MAX_RETRIES ]; then
-    echo "ERROR: Could not connect to MySQL after $MAX_RETRIES attempts" >&2
-    exit 1
+        if [ $ATTEMPT -eq $MAX_DB_RETRIES ]; then
+            echo "ERRO: Não foi possível conectar ao MySQL após $MAX_DB_RETRIES tentativas"
+            exit 1
+        fi
+
+        echo "MySQL não está disponível. Tentando novamente em $RETRY_INTERVAL segundos..."
+        sleep $RETRY_INTERVAL
+        ATTEMPT=$((ATTEMPT+1))
+    done
 fi
 
-# Verificar se o Xvfb está rodando
-if ! ps aux | grep -q "[X]vfb $XVFB_DISPLAY"; then
-    echo "ERROR: Xvfb failed to start" >&2
-    exit 1
-fi
+# Iniciar Xvfb no background
+Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
 
-# Configurações otimizadas para o Gunicorn
-WORKERS=$((2 * $(nproc) + 1))  # Fórmula recomendada para workers
-THREADS=4
-TIMEOUT=300
-MAX_REQUESTS=1000
-MAX_REQUESTS_JITTER=50
+# Exportar variáveis de ambiente necessárias
+export DISPLAY=:99
+export CHROME_BIN=/usr/bin/google-chrome
+export CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
-echo "Starting application with $WORKERS workers and $THREADS threads..."
-
-# Iniciar o Gunicorn com configurações otimizadas
+# Iniciar a aplicação
+echo "Iniciando a aplicação..."
 exec gunicorn app:app \
     --bind 0.0.0.0:8000 \
-    --workers $WORKERS \
-    --timeout $TIMEOUT \
-    --max-requests $MAX_REQUESTS \
-    --max-requests-jitter $MAX_REQUESTS_JITTER \
+    --workers 1 \
+    --threads 4 \
     --worker-class gthread \
-    --threads $THREADS \
-    --access-logfile - \
-    --error-logfile - \
+    --timeout 120 \
     --log-level info \
-    --capture-output \
-    --enable-stdio-inheritance
+    --access-logfile - \
+    --error-logfile -

@@ -28,7 +28,10 @@ from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Configuração de logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -36,11 +39,11 @@ app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
 # Configuração da conexão com o banco de dados MySQL
 DB_CONFIG = {
-    'host': '162.241.62.121',
-    'port': 3306,
-    'user': 'mudeit26_teste',
-    'password': 'teste2025@',
-    'database': 'mudeit26_site'
+    'host': os.getenv('DB_HOST', '162.241.62.121'),
+    'port': int(os.getenv('DB_PORT', '3306')),
+    'user': os.getenv('DB_USER', 'mudeit26_teste'),
+    'password': os.getenv('DB_PASSWORD', 'teste2025@'),
+    'database': os.getenv('DB_NAME', 'mudeit26_site')
 }
 
 
@@ -1616,14 +1619,34 @@ finder = ProdutoFinder()
 
 # Função para obter uma conexão com o banco de dados
 def get_db_connection():
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Exception as e:
-        logger.error(f"Erro ao conectar ao banco de dados: {str(e)}")
-        return None
+    max_retries = 3
+    retry_delay = 5
 
-# Decorator para verificar se o usuário está logado
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Tentativa {attempt + 1} de conexão com o MySQL em {DB_CONFIG['host']}")
+            connection = mysql.connector.connect(**DB_CONFIG)
+
+            # Testar a conexão
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+
+            logger.info("Conexão com MySQL estabelecida com sucesso")
+            return connection
+
+        except mysql.connector.Error as err:
+            logger.error(f"Erro ao conectar ao MySQL (tentativa {attempt + 1}): {err}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+        except Exception as e:
+            logger.error(f"Erro inesperado ao conectar ao MySQL: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+
+    logger.error("Falha ao conectar ao MySQL após várias tentativas")
+    return None
+    # Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):

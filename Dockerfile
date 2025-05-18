@@ -10,7 +10,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage --disable-software-rasterizer --remote-debugging-port=9222" \
     TZ=America/Sao_Paulo \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    FLASK_DEBUG=0
 
 # Configuração de timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -54,7 +55,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalação do Chrome (usando versão estável mais recente)
+# Instalação do Chrome
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y /tmp/chrome.deb \
@@ -62,7 +63,7 @@ RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-
     && rm -rf /var/lib/apt/lists/* \
     && google-chrome --version
 
-# Instalação de ChromeDriver estável diretamente do GitHub
+# Instalação do ChromeDriver
 RUN LATEST_RELEASE=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE) \
     && echo "Baixando ChromeDriver versão: ${LATEST_RELEASE}" \
     && wget -q -O /tmp/chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/${LATEST_RELEASE}/chromedriver_linux64.zip \
@@ -72,32 +73,29 @@ RUN LATEST_RELEASE=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST
     && rm /tmp/chromedriver_linux64.zip
 
 # Configuração do usuário e diretórios
-RUN useradd -m -s /bin/bash chrome_user \
-    && mkdir -p /home/chrome_user/Downloads \
+RUN useradd -m -s /bin/bash appuser \
+    && mkdir -p /home/appuser/Downloads \
     && mkdir -p /app \
-    && chown -R chrome_user:chrome_user /home/chrome_user \
-    && chown -R chrome_user:chrome_user /app
+    && chown -R appuser:appuser /home/appuser \
+    && chown -R appuser:appuser /app
 
-# Configuração do workspace e instalação de dependências Python
 WORKDIR /app
-COPY --chown=chrome_user:chrome_user requirements.txt .
 
+# Instalação de dependências Python
+COPY --chown=appuser:appuser requirements.txt .
 RUN pip install --no-cache-dir -U pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
 
 # Cópia dos arquivos da aplicação
-COPY --chown=chrome_user:chrome_user . .
+COPY --chown=appuser:appuser . .
 
 # Permissões e limpeza
 RUN chmod +x start.sh \
     && find /usr/local/lib/python3.10 -type d -name __pycache__ -exec rm -r {} + \
     && rm -rf /tmp/* /var/tmp/*
 
-USER chrome_user
+USER appuser
 
 EXPOSE 8000
-
-# Configuração do Gunicorn (ajuste conforme necessário)
-ENV GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=1 --threads=4 --worker-class=gthread --timeout=120 --log-level=info"
 
 CMD ["./start.sh"]
