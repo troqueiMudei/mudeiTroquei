@@ -16,34 +16,28 @@ RUN apt-get update && apt-get install -y \
     libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala Chrome Stable via repositório oficial
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+# Instala Chrome Stable
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && google-chrome --version
 
-# Instala ChromeDriver compatível
-RUN CHROME_MAJOR_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1) \
-    && CHROMEDRIVER_VERSION=$(wget -qO- https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR_VERSION}) \
-    && wget -q https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip \
+# Instala ChromeDriver (versão fixa compatível com Chrome 114)
+RUN wget -q https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip \
     && unzip chromedriver_linux64.zip \
     && mv chromedriver /usr/bin/ \
     && chmod +x /usr/bin/chromedriver \
-    && rm chromedriver_linux64.zip \
-    && chromedriver --version
+    && rm chromedriver_linux64.zip
 
-# Configuração do usuário não-root
-RUN useradd -m appuser && mkdir /app && chown appuser:appuser /app
 WORKDIR /app
-USER appuser
 
 # Instala dependências Python
-COPY --chown=appuser:appuser requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia a aplicação
-COPY --chown=appuser:appuser . .
+COPY . .
 
 # Script de inicialização
 CMD ["./start.sh"]

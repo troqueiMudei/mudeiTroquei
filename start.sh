@@ -4,14 +4,13 @@
 Xvfb :99 -screen 0 1280x1024x24 &
 export DISPLAY=:99
 
-# Verifica versões instaladas
-echo "=== Versões instaladas ==="
-google-chrome --version || { echo "Chrome não instalado corretamente"; exit 1; }
-chromedriver --version || { echo "ChromeDriver não instalado corretamente"; exit 1; }
+# Verifica instalações
+echo "=== Verificando dependências ==="
+/usr/bin/google-chrome --version || exit 1
+/usr/bin/chromedriver --version || exit 1
 
-# Configura variáveis críticas
+# Configurações adicionais
 export SELENIUM_DISABLE_MANAGER=1
-export PATH=$PATH:/home/appuser/.local/bin
 
 # Inicia a aplicação
 exec gunicorn app:app \
