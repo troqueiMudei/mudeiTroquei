@@ -143,20 +143,6 @@
                                 <p><strong>Telefone:</strong> {{ ficha.telefone or 'Não informado' }}</p>
                                 <p><strong>Email:</strong> {{ ficha.email or 'Não informado' }}</p>
                             </div>
-                            <div class="col-md-6">
-                                <form method="POST" action="{{ url_for('atualizar_status', id=ficha.id) }}" class="atualizar-status-form">
-                                    <div class="mb-3">
-                                        <label for="status" class="form-label"><strong>Atualizar Status:</strong></label>
-                                        <select class="form-select" id="status" name="status">
-                                            <option value="Análise" {% if ficha.status == 'Análise' %}selected{% endif %}>Análise</option>
-                                            <option value="Aprovado" {% if ficha.status == 'Aprovado' %}selected{% endif %}>Aprovado</option>
-                                            <option value="Reprovado" {% if ficha.status == 'Reprovado' %}selected{% endif %}>Reprovado</option>
-                                            <option value="Pendente" {% if ficha.status == 'Pendente' %}selected{% endif %}>Pendente</option>
-                                        </select>
-                                    </div>
-                                    <button type="submit" class="btn btn-primary">Salvar Status</button>
-                                </form>
-                            </div>
                         </div>
                     </div>
                 </div>

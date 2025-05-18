@@ -851,31 +851,21 @@ class ProdutoFinder:
         return "#"
 
     def _initialize_driver(self):
-        """Inicializa o WebDriver com configurações robustas"""
-        if self.driver:
-            return True
-
-        chrome_options = Options()
+        chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--window-size=1280,720")
-        chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
 
-        # Configuração explícita do ChromeDriver
-        service = Service(
-            executable_path='/usr/local/bin/chromedriver',
-            service_args=['--verbose'],
-            log_path='chromedriver.log'
-        )
+        # Desativa o Selenium Manager
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
 
         try:
             self.driver = webdriver.Chrome(
-                service=service,
+                service=Service(executable_path='/usr/bin/chromedriver'),
                 options=chrome_options
             )
-            self.driver.set_page_load_timeout(30)
             return True
         except Exception as e:
             logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
