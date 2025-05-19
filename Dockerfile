@@ -16,29 +16,20 @@ RUN apt-get update && apt-get install -y \
     libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome (latest stable version)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
+# Install Google Chrome (version 136.0.7103.113)
+RUN wget -q -O chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_136.0.7103.113-1_amd64.deb" && \
     apt-get update && \
-    apt-get install -y google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/* && \
+    apt-get install -y ./chrome.deb && \
+    rm chrome.deb && \
     google-chrome --version
 
-# Install ChromeDriver (matching Chrome version)
-RUN CHROME_VERSION=$(google-chrome --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+') && \
-    echo "Chrome version: ${CHROME_VERSION}" && \
-    CHROMEDRIVER_VERSION=$(wget -O- https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION} 2>/dev/null || echo "") && \
-    if [ -z "${CHROMEDRIVER_VERSION}" ]; then \
-        echo "Falling back to latest ChromeDriver version" && \
-        CHROMEDRIVER_VERSION=$(wget -O- https://chromedriver.storage.googleapis.com/LATEST_RELEASE 2>/dev/null); \
-    fi && \
-    echo "Using ChromeDriver version: ${CHROMEDRIVER_VERSION}" && \
-    wget -O chromedriver_linux64.zip https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip || \
-    wget -O chromedriver_linux64.zip https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip && \
-    unzip chromedriver_linux64.zip && \
-    mv chromedriver /usr/bin/ && \
+# Install matching ChromeDriver (version 136.0.7103.113)
+RUN CHROMEDRIVER_VERSION="136.0.7103.113" && \
+    wget -q -O chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" && \
+    unzip chromedriver.zip && \
+    mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
     chmod +x /usr/bin/chromedriver && \
-    rm chromedriver_linux64.zip && \
+    rm -rf chromedriver.zip chromedriver-linux64 && \
     chromedriver --version
 
 # Create non-root user
