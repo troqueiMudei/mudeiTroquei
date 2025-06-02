@@ -39,7 +39,7 @@ app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
 # Configuração da conexão com o banco de dados MySQL
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '162.241.62.121'),
+    'host': os.getenv('DB_HOST', '162.241.62.120'),
     'port': int(os.getenv('DB_PORT', '3306')),
     'user': os.getenv('DB_USER', 'mudeit26_teste'),
     'password': os.getenv('DB_PASSWORD', 'teste2025@'),
