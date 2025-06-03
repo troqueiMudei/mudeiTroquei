@@ -41,7 +41,7 @@ app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '162.241.62.120'),
     'port': int(os.getenv('DB_PORT', '3306')),
-    'user': os.getenv('DB_USER', 'mudeit26_teste'),
+    'user': os.getenv('DB_USER', 'mudeit26__teste'),
     'password': os.getenv('DB_PASSWORD', 'teste2025@'),
     'database': os.getenv('DB_NAME', 'mudeit26_site'),
     'connection_timeout': 30,
