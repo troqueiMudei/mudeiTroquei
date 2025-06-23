@@ -1845,10 +1845,12 @@ def detalhes_ficha(id):
         except (ValueError, TypeError, AttributeError):
             valor_estimado = 0.0
 
+        valor_estimado = valor_estimado * 1.05
+
         # Adiciona os valores calculados à ficha
-        ficha['valorEstimado'] = valor_estimado
-        ficha['demandaMedia'] = valor_estimado * 1.05  # +5%
-        ficha['demandaAlta'] = valor_estimado * 1.10  # +10%
+        ficha['valorEstimado'] = float(valor_estimado)
+        ficha['demandaMedia'] = float(valor_estimado * 1.05)  # +5%
+        ficha['demandaAlta'] = float(valor_estimado * 1.10)  # +10%
 
         # Formatar data de compra para o formato brasileiro
         if ficha.get('dataDeCompra'):
