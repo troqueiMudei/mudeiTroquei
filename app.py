@@ -1840,9 +1840,8 @@ def detalhes_ficha(id):
 
         # Cálculo do valor estimado e outras informações (com tratamento para valores nulos)
         try:
-            valor_str = re.sub(r'[^\d,]', '', str(ficha.get('valor', '0'))).replace(',', '.')
-            valor_estimado = float(valor_str) if valor_str else 0.0
-        except (ValueError, TypeError, AttributeError):
+            valor_estimado = float(ficha.get('valor', '0'))
+        except (ValueError, TypeError):
             valor_estimado = 0.0
 
         valor_estimado = valor_estimado * 1.05
