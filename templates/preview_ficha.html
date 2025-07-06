@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto p-6">
+    <div class="text-center mb-8">
+        <img src="/static/logo.png" alt="Mudei & Troquei" class="mx-auto h-16">
+        <h1 class="text-2xl font-bold text-gray-900 mt-4">Pré-visualização da Ficha</h1>
+        <p class="text-gray-600">Revise os dados antes de confirmar o cadastro</p>
+    </div>
+
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+        <!-- Informações Pessoais -->
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Informações Pessoais</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <p class="text-sm text-gray-500">Nome</p>
+                    <p class="font-medium">{{ ficha.nome }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">CPF</p>
+                    <p class="font-medium">{{ ficha.cpf }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Telefone</p>
+                    <p class="font-medium">{{ ficha.telefone }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Email</p>
+                    <p class="font-medium">{{ ficha.email }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Informações do Produto -->
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Informações do Produto</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <p class="text-sm text-gray-500">Produto</p>
+                    <p class="font-medium">{{ ficha.produto }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Marca</p>
+                    <p class="font-medium">{{ ficha.marca }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Quantidade</p>
+                    <p class="font-medium">{{ ficha.quantidade }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Data da Compra</p>
+                    <p class="font-medium">{{ ficha.data_compra_br }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Valor Unitário</p>
+                    <p class="font-medium">R$ {{ "%.2f"|format(ficha.valor) }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Marcas de Uso</p>
+                    <p class="font-medium">{{ ficha.marcaUso if ficha.marcaUso else 'Nenhuma' }}</p>
+                </div>
+                <div class="md:col-span-2">
+                    <p class="text-sm text-gray-500">Descrição</p>
+                    <p class="font-medium">{{ ficha.descricao }}</p>
+                </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-3 gap-4">
+                <div>
+                    <p class="text-sm text-gray-500">Altura (cm)</p>
+                    <p class="font-medium">{{ ficha.altura }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Largura (cm)</p>
+                    <p class="font-medium">{{ ficha.largura }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Profundidade (cm)</p>
+                    <p class="font-medium">{{ ficha.profundidade }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Informações Adicionais -->
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Informações Adicionais</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <p class="text-sm text-gray-500">Bairro</p>
+                    <p class="font-medium">{{ ficha.bairro_nome }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Outro Bairro</p>
+                    <p class="font-medium">{{ ficha.outroBairro if ficha.outroBairro else 'Nenhum' }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Voltagem</p>
+                    <p class="font-medium">{{ ficha.voltagem }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Precisa de Limpeza</p>
+                    <p class="font-medium">{{ 'Sim' if ficha.precisa_limpeza == 'sim' else 'Não' }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Precisa de Desmontagem</p>
+                    <p class="font-medium">{{ 'Sim' if ficha.precisa_desmontagem == 'sim' else 'Não' }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Possui Nota Fiscal</p>
+                    <p class="font-medium">{{ 'Sim' if ficha.possui_nota_fiscal == 'sim' else 'Não' }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Aceita Crédito</p>
+                    <p class="font-medium">{{ 'Sim' if ficha.aceita_credito == 'sim' else 'Não' }}</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-500">Tipo de Reparo</p>
+                    <p class="font-medium">
+                        {% if ficha.tipo_reparo == 'nenhum' %}Nenhum
+                        {% elif ficha.tipo_reparo == 'limpeza' %}Limpeza
+                        {% elif ficha.tipo_reparo == 'conserto' %}Conserto
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="md:col-span-2">
+                    <p class="text-sm text-gray-500">Estado do Produto</p>
+                    <p class="font-medium">
+                        {% for estado in ficha.estado %}
+                            {% if estado == 'novo' %}Novo{% endif %}
+                            {% if estado == 'usado' %}Usado{% endif %}
+                            {% if estado == 'possui_mofo' %}Possui Mofo{% endif %}
+                            {% if estado == 'possui_cupim' %}Possui Cupim{% endif %}
+                            {% if estado == 'esta_trincado' %}Está Trincado{% endif %}
+                            {% if not loop.last %}, {% endif %}
+                        {% else %}
+                            Nenhum estado específico
+                        {% endfor %}
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Imagem do Produto -->
+        {% if ficha.imagem_url %}
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Imagem do Produto</h2>
+            <div class="flex justify-center">
+                <img src="{{ ficha.imagem_url }}" alt="Imagem do Produto" class="max-h-64 rounded-md shadow">
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Produtos Similares -->
+        {% if ficha.produtos_similares %}
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Produtos Similares Encontrados</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {% for produto in ficha.produtos_similares %}
+                <div class="border rounded-lg p-4">
+                    {% if produto.img %}
+                    <img src="{{ produto.img }}" alt="{{ produto.nome }}" class="w-full h-32 object-contain mb-2">
+                    {% endif %}
+                    <h3 class="font-medium">{{ produto.nome }}</h3>
+                    <p class="text-sm text-gray-600">{{ produto.preco }}</p>
+                    <a href="{{ produto.url }}" target="_blank" class="text-sm text-green-600 hover:text-green-800">Ver produto</a>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Valores Estimados -->
+        <div class="p-6">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Valores Estimados</h2>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Valor Original</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.valor) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Valor Estimado (+5%)</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.valorEstimado) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Demanda Média (+5%)</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.demandaMedia) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Demanda Alta (+10%)</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.demandaAlta) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Botões de Ação -->
+    <div class="mt-6 flex justify-between">
+        <a href="{{ url_for('nova_ficha') }}" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+            Corrigir Dados
+        </a>
+
+        <form method="post" action="{{ url_for('cadastrar_ficha') }}" class="inline-flex">
+            <!-- Campos ocultos com todos os dados -->
+            <input type="hidden" name="nome" value="{{ ficha.nome }}">
+            <input type="hidden" name="cpf" value="{{ ficha.cpf }}">
+            <input type="hidden" name="telefone" value="{{ ficha.telefone }}">
+            <input type="hidden" name="email" value="{{ ficha.email }}">
+            <input type="hidden" name="produto" value="{{ ficha.produto }}">
+            <input type="hidden" name="marca" value="{{ ficha.marca }}">
+            <input type="hidden" name="quantidade" value="{{ ficha.quantidade }}">
+            <input type="hidden" name="data_compra" value="{{ ficha.data_compra }}">
+            <input type="hidden" name="valor_unitario" value="{{ ficha.valor }}">
+            <input type="hidden" name="marcas_uso" value="{{ ficha.marcaUso }}">
+            <input type="hidden" name="descricao" value="{{ ficha.descricao }}">
+            <input type="hidden" name="altura" value="{{ ficha.altura }}">
+            <input type="hidden" name="largura" value="{{ ficha.largura }}">
+            <input type="hidden" name="profundidade" value="{{ ficha.profundidade }}">
+            <input type="hidden" name="bairro" value="{{ ficha.bairro }}">
+            <input type="hidden" name="outro_bairro" value="{{ ficha.outroBairro }}">
+            <input type="hidden" name="voltagem" value="{{ ficha.voltagem }}">
+            <input type="hidden" name="precisa_limpeza" value="{{ ficha.precisa_limpeza }}">
+            <input type="hidden" name="precisa_desmontagem" value="{{ ficha.precisa_desmontagem }}">
+            <input type="hidden" name="possui_nota_fiscal" value="{{ ficha.possui_nota_fiscal }}">
+            <input type="hidden" name="aceita_credito" value="{{ ficha.aceita_credito }}">
+            <input type="hidden" name="tipo_reparo" value="{{ ficha.tipo_reparo }}">
+            {% for estado in ficha.estado %}
+            <input type="hidden" name="estado[]" value="{{ estado }}">
+            {% endfor %}
+            <input type="hidden" name="imagem_url" value="{{ ficha.imagem_url }}">
+
+            <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                Confirmar Cadastro
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

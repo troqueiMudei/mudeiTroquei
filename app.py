@@ -34,6 +34,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Mapeamento de bairros
+BAIRROS = {
+    1: "Barra da Tijuca",
+    2: "Recreio dos Bandeirantes",
+    3: "Vargem Grande",
+    4: "Vargem Pequena",
+    5: "Gardênia Azul",
+    6: "Cidade de Deus",
+    7: "Curicica",
+    8: "Taquara",
+    9: "Pechincha",
+    10: "Freguesia (Jacarepaguá)",
+    11: "Camorim",
+    12: "Tanque",
+    13: "Praça Seca",
+    14: "Madureira",
+    16: "Cascadura",
+    17: "Campinho",
+    18: "Méier",
+    19: "Engenho de Dentro",
+    20: "Vila Isabel",
+    21: "Tijuca",
+    22: "Maracanã",
+    23: "São Cristóvão",
+    24: "Centro",
+    25: "Flamengo",
+    26: "Botafogo",
+    27: "Copacabana",
+    28: "Ipanema",
+    29: "Leblon",
+    30: "Jardim Botânico",
+    31: "Laranjeiras",
+    32: "Cosme Velho",
+    33: "Glória",
+    34: "Santa Teresa",
+    35: "Lapa",
+    36: "Penha",
+    37: "Olaria",
+    38: "Ramos",
+    39: "Bonsucesso",
+    40: "Ilha do Governador",
+    41: "Pavuna",
+    42: "Anchieta",
+    43: "Guadalupe",
+    44: "Deodoro",
+    45: "Realengo",
+    46: "Bangu",
+    47: "Campo Grande",
+    48: "Santa Cruz",
+    49: "Sepetiba",
+    50: "Guaratiba",
+    51: "Pedra de Guaratiba",
+    52: "Grajaú",
+    53: "Engenho Novo",
+    54: "Rocha Miranda",
+    55: "Higienópolis"
+}
+
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
@@ -1957,6 +2015,100 @@ def test_db():
             }
         }
 
+
+@app.route('/preview_ficha', methods=['POST'])
+def preview_ficha():
+    """Rota para visualizar os dados do formulário antes de cadastrar"""
+    try:
+        # Coleta dos dados do formulário
+        form_data = {
+            'nome': request.form.get('nome', ''),
+            'cpf': request.form.get('cpf', ''),
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', ''),
+            'produto': request.form.get('produto', ''),
+            'marca': request.form.get('marca', ''),
+            'quantidade': float(request.form.get('quantidade', 1)),
+            'data_compra': request.form.get('data_compra', ''),
+            'valor': float(request.form.get('valor_unitario', 0)),
+            'marcaUso': request.form.get('marcas_uso', ''),
+            'descricao': request.form.get('descricao', ''),
+            'altura': float(request.form.get('altura', 0)),
+            'largura': float(request.form.get('largura', 0)),
+            'profundidade': float(request.form.get('profundidade', 0)),
+            'bairro': int(request.form.get('bairro', 0)),
+            'outroBairro': request.form.get('outro_bairro', ''),
+            'voltagem': request.form.get('voltagem', ''),
+            'precisa_limpeza': request.form.get('precisa_limpeza', 'não'),
+            'precisa_desmontagem': request.form.get('precisa_desmontagem', 'não'),
+            'possui_nota_fiscal': request.form.get('possui_nota_fiscal', 'não'),
+            'aceita_credito': request.form.get('aceita_credito', 'não'),
+            'tipo_reparo': request.form.get('tipo_reparo', 'nenhum'),
+            'estado': request.form.getlist('estado[]'),
+            'imagem_url': None,
+            'produtos_similares': []
+        }
+
+        # Processar imagem
+        if 'imagem' in request.files:
+            imagem = request.files['imagem']
+            if imagem.filename != '':
+                try:
+                    img = Image.open(imagem)
+                    img_url = finder._convert_image_to_url(image=img)
+                    form_data['imagem_url'] = img_url
+
+                    # Buscar produtos similares
+                    if img_url:
+                        form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
+                except Exception as e:
+                    logger.error(f"Erro ao processar imagem: {str(e)}")
+                    form_data['erro_imagem'] = str(e)
+
+        # Converter bairro ID para nome
+        form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
+
+        # Formatar data
+        if form_data['data_compra']:
+            try:
+                data_obj = datetime.strptime(form_data['data_compra'], '%Y-%m-%d')
+                form_data['data_compra_br'] = data_obj.strftime('%d/%m/%Y')
+            except ValueError:
+                form_data['data_compra_br'] = form_data['data_compra']
+        else:
+            form_data['data_compra_br'] = "Não informada"
+
+        # Calcular valores estimados
+        valor_estimado = form_data['valor'] * 1.05
+        form_data['valorEstimado'] = valor_estimado
+        form_data['demandaMedia'] = valor_estimado * 1.05
+        form_data['demandaAlta'] = valor_estimado * 1.10
+
+        return render_template('preview_ficha.html', ficha=form_data)
+
+    except Exception as e:
+        logger.error(f"Erro ao processar pré-visualização: {str(e)}")
+        return render_template('erro.html', mensagem="Ocorreu um erro ao processar a pré-visualização"), 500
+
+@app.route('/nova_ficha')
+def nova_ficha():
+    """Exibe o formulário para cadastrar uma nova ficha"""
+    return render_template('form_ficha.html', bairros=BAIRROS)
+
+
+@app.route('/cadastrar_ficha', methods=['POST'])
+def cadastrar_ficha():
+    """Rota para cadastrar a ficha após a pré-visualização"""
+    try:
+        # Aqui você colocaria a lógica para inserir no banco de dados
+        # Similar ao que você já tem na rota de upload_produto do código antigo
+
+        # Após cadastrar, redireciona para a lista de fichas
+        return redirect(url_for('lista_fichas'))
+
+    except Exception as e:
+        logger.error(f"Erro ao cadastrar ficha: {str(e)}")
+        return render_template('erro.html', mensagem="Ocorreu um erro ao cadastrar a ficha"), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
