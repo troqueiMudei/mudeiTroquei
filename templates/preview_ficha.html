@@ -155,17 +155,47 @@
         {% if ficha.produtos_similares %}
         <div class="p-6 border-b border-gray-200">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Produtos Similares Encontrados</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {% for produto in ficha.produtos_similares %}
-                <div class="border rounded-lg p-4">
-                    {% if produto.img %}
-                    <img src="{{ produto.img }}" alt="{{ produto.nome }}" class="w-full h-32 object-contain mb-2">
-                    {% endif %}
-                    <h3 class="font-medium">{{ produto.nome }}</h3>
-                    <p class="text-sm text-gray-600">{{ produto.preco }}</p>
-                    <a href="{{ produto.url }}" target="_blank" class="text-sm text-green-600 hover:text-green-800">Ver produto</a>
-                </div>
-                {% endfor %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Imagem</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Produto</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Preço</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fonte</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for produto in ficha.produtos_similares %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% if produto.imagem %}
+                                <img src="{{ produto.imagem }}" alt="{{ produto.nome }}" class="h-16 w-16 object-contain">
+                                {% else %}
+                                <div class="h-16 w-16 bg-gray-100 flex items-center justify-center">
+                                    <span class="text-xs text-gray-400">Sem imagem</span>
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900">{{ produto.nome }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-gray-900">{{ produto.preco }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    {{ produto.fonte }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <a href="{{ produto.url }}" target="_blank" class="text-green-600 hover:text-green-900">Ver Produto</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
         {% endif %}

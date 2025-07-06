@@ -494,24 +494,51 @@ class ProdutoFinder:
     def _extract_products_alternative(self):
         """Método alternativo quando o principal falha"""
         try:
-            # Tenta encontrar elementos de forma mais genérica
             produtos = []
-            elements = self.driver.find_elements(By.CSS_SELECTOR, "div[role='listitem'], div[role='article']")
+            elements = self.driver.find_elements(By.XPATH, "//div[@role='listitem'] | //div[@role='article']")
 
             for element in elements[:5]:  # Limita a 5 itens
                 try:
-                    produto = {
-                        "nome": element.find_element(By.CSS_SELECTOR, "[role='heading']").text,
-                        "preco": element.find_element(By.CSS_SELECTOR, "span").text,
-                        "url": element.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
-                        "img": element.find_element(By.CSS_SELECTOR, "img").get_attribute("src")
-                    }
-                    produtos.append(produto)
-                except:
+                    # Extrai nome
+                    name = self._safe_extract_text(element, [
+                        ".//h3", ".//h4",
+                        ".//div[contains(@class, 'title')]",
+                        ".//div[contains(@class, 'header')]"
+                    ])
+
+                    # Extrai preço
+                    price = self._safe_extract_text(element, [
+                        ".//span[contains(@class, 'price')]",
+                        ".//span[contains(@class, 'e10twf')]",
+                        ".//span[contains(@class, 'a8Pemb')]"
+                    ]) or "Preço não disponível"
+
+                    # Extrai URL
+                    url = self._safe_extract_attr(element, "href", [
+                        ".//a"
+                    ]) or "#"
+
+                    # Extrai imagem
+                    img = self._safe_extract_attr(element, "src", [
+                        ".//img"
+                    ]) or ""
+
+                    if name and url:
+                        produtos.append({
+                            "nome": name,
+                            "preco": price,
+                            "url": url,
+                            "img": img,
+                            "fonte": "Google Lens"
+                        })
+                except Exception as e:
+                    logger.warning(f"Erro ao extrair produto: {str(e)}")
                     continue
 
-            return produtos if produtos else []
-        except:
+            return produtos
+
+        except Exception as e:
+            logger.error(f"Erro na extração alternativa: {str(e)}")
             return []
 
     def fallback_search_by_image_description(self, image_path=None, description=None):
@@ -1321,88 +1348,65 @@ class ProdutoFinder:
         return "#"
 
     def _extract_products_comprehensive(self):
-        """Método mais robusto para extrair produtos"""
+        """Método mais robusto para extrair produtos com todas as informações"""
         produtos = []
 
         try:
-            # Aguardar mais tempo para carregar os resultados
+            # Espera até que os resultados estejam carregados
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'Lv3Kxc')]"))
             )
 
-            # Tentar vários seletores atualizados (maio/2025)
-            selectors = [
-                # Seletores para Google Shopping
-                "//div[contains(@class, 'sh-dgr__grid-result')]",
-                "//div[contains(@class, 'sh-dlr__list-result')]",
-                "//div[contains(@class, 'pla-unit')]",
+            # Extrai os produtos usando JavaScript para maior confiabilidade
+            produtos = self.driver.execute_script("""
+                const results = [];
+                const productContainers = document.querySelectorAll('div.sh-dgr__grid-result, div.Lv3Kxc, div[data-product]');
 
-                # Seletores para Google Lens
-                "//div[contains(@class, 'UAiK1e')]//div[contains(@class, 'Lv3Kxc')]",
-                "//div[contains(@class, 'PJLMUc')]",
-                "//a[contains(@class, 'UAQDqe')]",
+                productContainers.forEach(container => {
+                    try {
+                        // Extrai nome
+                        const nameElement = container.querySelector('h3, h4, [role="heading"], [class*="title"]');
+                        const name = nameElement?.innerText?.trim() || 'Produto similar';
 
-                # Novos seletores alternativos
-                "//div[@data-product]",
-                "//div[contains(@class, 'commercial-unit')]",
-                "//div[@role='listitem']"
-            ]
+                        // Extrai preço
+                        const priceElement = container.querySelector('[class*="price"], span[aria-hidden="true"]');
+                        const price = priceElement?.innerText?.trim() || 'Preço não disponível';
 
-            for selector in selectors:
-                try:
-                    elements = self.driver.find_elements(By.XPATH, selector)
-                    if elements:
-                        logger.info(f"Encontrados {len(elements)} elementos com seletor: {selector}")
+                        // Extrai URL
+                        const linkElement = container.querySelector('a');
+                        const url = linkElement?.href || '#';
 
-                        for element in elements[:5]:  # Limitar a 5 resultados
-                            try:
-                                produto = {
-                                    "nome": self._extract_with_retry(element, [
-                                        ".//h3", ".//h4",
-                                        ".//div[contains(@class, 'title')]",
-                                        ".//div[contains(@class, 'header')]"
-                                    ]),
+                        // Extrai imagem
+                        const imgElement = container.querySelector('img');
+                        const img = imgElement?.src || '';
 
-                                    "preco": self._extract_with_retry(element, [
-                                        ".//span[contains(@class, 'price')]",
-                                        ".//span[contains(@class, 'e10twf')]",
-                                        ".//span[contains(@class, 'a8Pemb')]"
-                                    ]),
+                        // Extrai fonte (Google Shopping ou outro)
+                        const source = container.classList.contains('sh-dgr__grid-result') ? 
+                            'Google Shopping' : 'Google Lens';
 
-                                    "url": self._extract_attribute_with_retry(element, "href", [
-                                        ".//a"
-                                    ]),
+                        if (name && url) {
+                            results.push({
+                                nome: name,
+                                preco: price,
+                                url: url,
+                                img: img,
+                                fonte: source
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error extracting product:', e);
+                    }
+                });
 
-                                    "img": self._extract_attribute_with_retry(element, "src", [
-                                        ".//img"
-                                    ])
-                                }
-
-                                if produto["nome"] and produto["url"]:
-                                    produtos.append(produto)
-                            except Exception as e:
-                                logger.warning(f"Erro ao extrair produto: {str(e)}")
-                                continue
-
-                        if produtos:
-                            break
-                except Exception as e:
-                    logger.warning(f"Erro com seletor {selector}: {str(e)}")
-                    continue
-
-            # Se ainda não encontrou, tentar rolar a página
-            if not produtos:
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
-                produtos = self._extract_with_javascript()
+                return results.slice(0, 5); // Limita a 5 resultados
+            """) or []
 
         except Exception as e:
-            logger.error(f"Erro na extração: {str(e)}")
-            # Tentar fallback com JavaScript
-            produtos = self._extract_with_javascript()
+            logger.error(f"Erro na extração principal: {str(e)}")
+            produtos = self._extract_products_alternative()
 
-        return produtos or []
+        return produtos
 
     def _extract_products(self):
         """Extrai produtos com múltiplas estratégias"""
@@ -1561,6 +1565,30 @@ class ProdutoFinder:
                 continue
 
         return produto
+
+    def buscar_produtos_similares(image_url):
+        """Busca produtos similares no Google Lens com mais informações"""
+        try:
+            finder = ProdutoFinder()
+            produtos = finder.buscar_produtos_por_url(image_url)
+
+            # Filtra e formata os resultados
+            produtos_formatados = []
+            for produto in produtos:
+                if produto.get('nome') and produto.get('url'):
+                    produtos_formatados.append({
+                        'nome': produto.get('nome', 'Produto similar'),
+                        'preco': produto.get('preco', 'Preço não disponível'),
+                        'url': produto.get('url', '#'),
+                        'imagem': produto.get('img', ''),
+                        'fonte': produto.get('fonte', 'Google Lens')
+                    })
+
+            return produtos_formatados[:5]  # Limita a 5 resultados
+
+        except Exception as e:
+            logger.error(f"Erro na busca de produtos similares: {str(e)}")
+            return []
 
     def _executar_busca(self, search_url):
         """Método interno para executar a busca no Google Lens"""
@@ -2058,9 +2086,9 @@ def preview_ficha():
                     img_url = finder._convert_image_to_url(image=img)
                     form_data['imagem_url'] = img_url
 
-                    # Buscar produtos similares
+                    # Buscar produtos similares com as melhorias
                     if img_url:
-                        form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
+                        form_data['produtos_similares'] = buscar_produtos_similares(img_url)
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
