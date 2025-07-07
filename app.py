@@ -532,6 +532,9 @@ class ProdutoFinder:
             logger.error(f"Erro na extração da página do Lens: {str(e)}")
             return []
 
+# Inicializar o finder globalmente
+finder = ProdutoFinder()
+
 @app.route('/preview_ficha', methods=['POST'])
 def preview_ficha():
     """Rota para visualizar os dados do formulário antes de cadastrar"""
