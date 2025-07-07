@@ -162,7 +162,7 @@
                     <img src="{{ produto.img }}" alt="{{ produto.nome }}" class="w-full h-32 object-contain mb-2">
                     {% endif %}
                     <h3 class="font-medium">{{ produto.nome }}</h3>
-                    <p class="text-sm text-gray-600">{{ produto.preco }}</p>
+                    <p class="text-sm text-gray-600">R${{ produto.preco }}</p>
                     <a href="{{ produto.url }}" target="_blank" class="text-sm text-green-600 hover:text-green-800">Ver produto</a>
                 </div>
                 {% endfor %}
