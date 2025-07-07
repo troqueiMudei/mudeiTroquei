@@ -109,6 +109,7 @@ DB_CONFIG = {
     'pool_reset_session': True
 }
 
+
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
@@ -121,19 +122,23 @@ class ProdutoFinder:
         ]
 
     def _initialize_driver(self):
+        """Inicializa o WebDriver usando webdriver_manager para gerenciar o ChromeDriver."""
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--window-size=1280,720")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
         os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
 
         try:
+            # Usar webdriver_manager para instalar o ChromeDriver automaticamente
             self.driver = webdriver.Chrome(
-                service=Service(executable_path='/usr/bin/chromedriver'),
+                service=Service(ChromeDriverManager().install()),
                 options=chrome_options
             )
+            logger.info("WebDriver inicializado com sucesso")
             return True
         except Exception as e:
             logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
@@ -163,7 +168,7 @@ class ProdutoFinder:
                     img.thumbnail(optimal_size, Image.LANCZOS)
                     enhancer = ImageEnhance.Contrast(img)
                     img = enhancer.enhance(1.2)
-                    img = img.filter(ImageFilter.SHARPEN)
+                    img = image.filter(ImageFilter.SHARPEN)
                     img_buffer = io.BytesIO()
                     img.save(img_buffer, format='JPEG', quality=90)
                     img_buffer.seek(0)
@@ -216,7 +221,7 @@ class ProdutoFinder:
                     img.thumbnail(optimal_size, Image.LANCZOS)
                     enhancer = ImageEnhance.Contrast(img)
                     img = enhancer.enhance(1.2)
-                    img = img.filter(ImageFilter.SHARPEN)
+                    img = image.filter(ImageFilter.SHARPEN)
                     img_buffer = io.BytesIO()
                     img.save(img_buffer, format='JPEG', quality=90)
                     img_buffer.seek(0)
@@ -269,11 +274,13 @@ class ProdutoFinder:
             "div#captcha",
             "div.recaptcha",
             "iframe[src*='recaptcha']",
-            "div[class*='captcha']"
+            "div[class*='captcha']",
+            "div[class*='g-recaptcha']"
         ]
         for selector in captcha_selectors:
             try:
                 if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                    logger.warning("Captcha detectado na página")
                     return True
             except:
                 continue
@@ -297,7 +304,8 @@ class ProdutoFinder:
             ".//div[contains(@class, 'sh-np__product-title')]",
             ".//div[contains(@class, 'BXIkFb')]",
             ".//div[contains(@class, 'pymv4e')]",
-            ".//div[contains(@class, 'UAQDqe')]"
+            ".//div[contains(@class, 'UAQDqe')]",
+            ".//div[@role='heading']"
         ]
         for selector in name_selectors:
             try:
@@ -310,7 +318,7 @@ class ProdutoFinder:
             except:
                 continue
 
-        # Extract price
+        # Extract price (expanded selectors for 2025 Google Lens structure)
         price_selectors = [
             ".//span[contains(@class, 'price')]",
             ".//span[contains(@class, 'e10twf')]",
@@ -320,13 +328,18 @@ class ProdutoFinder:
             ".//span[contains(@class, 'sh-np__product-price')]",
             ".//span[@aria-label='Price']",
             ".//div[contains(@class, 'price-container')]",
-            ".//span[contains(text(), 'R$')]"  # Adicionado para preços em reais
+            ".//span[contains(text(), 'R$') or contains(text(), 'BRL')]",
+            ".//div[contains(@class, 'sh-dgr__content')]//span[contains(text(), '$') or contains(text(), 'R$')]",
+            ".//div[contains(@class, 'sh-dgr__offer')]//span",
+            ".//div[contains(@class, 'sh-prc__price')]"
         ]
         for selector in price_selectors:
             try:
                 price_element = element.find_element(By.XPATH, selector)
                 price = price_element.text.strip()
-                if price:
+                if price and any(currency in price for currency in ['R$', '$', 'BRL']):
+                    # Clean price string
+                    price = re.sub(r'[^\d,.R$]', '', price).strip()
                     produto["preco"] = price
                     logger.info(f"Preço encontrado com seletor {selector}: {price}")
                     break
@@ -334,27 +347,56 @@ class ProdutoFinder:
                 logger.warning(f"Falha ao extrair preço com seletor {selector}: {str(e)}")
                 continue
 
+        # Fallback: Extract price using JavaScript
+        if produto["preco"] == "Preço não disponível":
+            try:
+                price = element.find_element(By.XPATH,
+                                             ".//span[contains(@class, 'sh-np__product-price') or contains(text(), 'R$')]").text.strip()
+                if price:
+                    produto["preco"] = price
+                    logger.info(f"Preço encontrado via fallback XPath: {price}")
+            except:
+                try:
+                    price = self.driver.execute_script(
+                        "return arguments[0].querySelector('span[class*=\"price\"], div[class*=\"price\"]')?.innerText || 'Preço não disponível';",
+                        element
+                    )
+                    if price != 'Preço não disponível' and any(currency in price for currency in ['R$', '$', 'BRL']):
+                        produto["preco"] = re.sub(r'[^\d,.R$]', '', price).strip()
+                        logger.info(f"Preço encontrado via JavaScript: {produto['preco']}")
+                except Exception as e:
+                    logger.warning(f"Falha ao extrair preço via JavaScript: {str(e)}")
+
         # Extract URL
         url_selectors = [
-            ".//a[contains(@href, '/shopping/product')]",
-            ".//a[contains(@class, 'shntl')]",
-            ".//a[contains(@class, 'sh-np__click-target')]",
-            ".//a[contains(@class, 'UAQDqe')]"
+            ".//a[contains(@href, '/shopping/product') or contains(@href, 'product') or contains(@class, 'shntl')]",
+            ".//a[contains(@class, 'sh-np__click-target') and not(contains(@href, 'review') or contains(@href, 'ratings'))]",
+            ".//a[contains(@class, 'UAQDqe') and not(contains(@href, 'review') or contains(@href, 'ratings'))]",
+            ".//a[@href and not(contains(@href, 'lens.google.com') or contains(@href, 'review') or contains(@href, 'ratings'))]"
         ]
         for selector in url_selectors:
             try:
                 url_element = element.find_element(By.XPATH, selector)
                 url = url_element.get_attribute('href')
                 if url and not any(term in url.lower() for term in ['review', 'ratings', 'lens.google.com']):
+                    # Resolve redirects with additional validation
                     try:
-                        response = requests.get(url, allow_redirects=True, timeout=5)
+                        headers = {
+                            'User-Agent': random.choice(self.user_agents),
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+                        }
+                        response = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
                         final_url = response.url
-                        if not any(term in final_url.lower() for term in ['review', 'ratings']):
+                        # Validate if URL is likely a product page
+                        if any(term in final_url.lower() for term in ['product', 'buy', 'shop', 'cart', 'item']):
                             produto["url"] = final_url
                             logger.info(f"URL final após redirecionamento: {final_url}")
                         else:
-                            produto["url"] = url
-                    except:
+                            logger.warning(f"URL ignorado, não parece página de produto: {final_url}")
+                            continue
+                    except Exception as e:
+                        logger.warning(f"Falha ao resolver redirecionamento para {url}: {str(e)}")
                         produto["url"] = url
                     logger.info(f"URL extraído: {produto['url']}")
                     break
@@ -365,13 +407,14 @@ class ProdutoFinder:
         img_selectors = [
             ".//img",
             ".//div[contains(@class, 'cOPFNb')]//img",
-            ".//div[contains(@class, 'eUQRje')]//img"
+            ".//div[contains(@class, 'eUQRje')]//img",
+            ".//img[@src and not(contains(@src, 'placeholder'))]"
         ]
         for selector in img_selectors:
             try:
                 img_element = element.find_element(By.XPATH, selector)
                 img_src = img_element.get_attribute('src')
-                if img_src:
+                if img_src and not img_src.startswith('data:image'):
                     produto["img"] = img_src
                     logger.info(f"Imagem extraída: {img_src}")
                     break
@@ -408,8 +451,9 @@ class ProdutoFinder:
                             try:
                                 produto = self._extract_single_product_info(element)
                                 if (produto["nome"] and
-                                    produto["url"] != "#" and
-                                    not any(term in produto["url"].lower() for term in ['review', 'ratings', 'lens.google.com'])):
+                                        produto["url"] != "#" and
+                                        not any(term in produto["url"].lower() for term in
+                                                ['review', 'ratings', 'lens.google.com'])):
                                     produtos.append(produto)
                             except Exception as e:
                                 logger.warning(f"Erro ao extrair produto: {str(e)}")
@@ -440,9 +484,9 @@ class ProdutoFinder:
                         if (index >= 5) return;
                         try {
                             const nameEl = product.querySelector("div[role='heading']");
-                            const priceEl = product.querySelector("span[aria-hidden='true'], span[class*='price'], div[class*='price']");
-                            const linkEl = product.querySelector("a:not([href*='review']):not([href*='ratings'])");
-                            const imgEl = product.querySelector("img");
+                            const priceEl = product.querySelector("span[class*='price'], div[class*='price'], span[aria-label*='Price'], span:not([class*='rating'])");
+                            const linkEl = product.querySelector("a:not([href*='review']):not([href*='ratings']):not([href*='lens.google.com'])");
+                            const imgEl = product.querySelector("img:not([src*='placeholder'])");
                             if (nameEl && linkEl) {
                                 results.push({
                                     nome: nameEl.innerText.trim() || 'Produto similar',
@@ -474,23 +518,49 @@ class ProdutoFinder:
             logger.info(f"\nURL de busca no Google Lens: {search_url}")
             self.driver.get(search_url)
             time.sleep(8)
+
+            # Verificar captcha
+            if self._check_for_captcha():
+                logger.error("Captcha detectado, interrompendo busca")
+                return []
+
             current_url = self.driver.current_url
             logger.info(f"\nURL atual após redirecionamento: {current_url}")
+
+            # Tentar clicar na aba Shopping
             try:
                 shopping_tab = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Shopping')]"))
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
                 )
                 shopping_tab.click()
                 time.sleep(3)
             except:
                 logger.warning("Aba Shopping não encontrada, continuando com extração direta")
+
+            # Tentar rolar a página para carregar mais resultados
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+
+            # Salvar screenshot para debug
+            screenshot_path = f"debug_screenshot_{int(time.time())}.png"
+            self.driver.save_screenshot(screenshot_path)
+            logger.info(f"Screenshot salvo em: {screenshot_path}")
+
             produtos = self._extract_products_comprehensive()
             logger.info(f"\n=== Resultados encontrados ===")
             for i, p in enumerate(produtos, 1):
                 logger.info(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+
+            # Filtrar produtos com URLs inválidas
+            produtos = [p for p in produtos if p["url"] != "#" and "lens.google.com" not in p["url"].lower()]
+
             return produtos
         except Exception as e:
             logger.error(f"\nErro durante a busca: {str(e)}")
+            screenshot_path = f"debug_screenshot_error_{int(time.time())}.png"
+            self.driver.save_screenshot(screenshot_path)
+            logger.info(f"Screenshot de erro salvo em: {screenshot_path}")
             return []
         finally:
             self.cleanup()
@@ -519,8 +589,9 @@ class ProdutoFinder:
                 try:
                     produto = self._extract_single_product_info(product)
                     if (produto["nome"] and
-                        produto["url"] != "#" and
-                        not any(term in produto["url"].lower() for term in ['review', 'ratings', 'lens.google.com'])):
+                            produto["url"] != "#" and
+                            not any(
+                                term in produto["url"].lower() for term in ['review', 'ratings', 'lens.google.com'])):
                         produtos.append(produto)
                         if len(produtos) >= 5:
                             break
@@ -532,8 +603,10 @@ class ProdutoFinder:
             logger.error(f"Erro na extração da página do Lens: {str(e)}")
             return []
 
+
 # Inicializar o finder globalmente
 finder = ProdutoFinder()
+
 
 @app.route('/preview_ficha', methods=['POST'])
 def preview_ficha():
@@ -578,7 +651,8 @@ def preview_ficha():
                         form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
                         logger.info(f"Produtos encontrados: {len(form_data['produtos_similares'])}")
                         for i, produto in enumerate(form_data['produtos_similares'], 1):
-                            logger.info(f"Produto {i}: {produto['nome']} | Preço: {produto['preco']} | URL: {produto['url']}")
+                            logger.info(
+                                f"Produto {i}: {produto['nome']} | Preço: {produto['preco']} | URL: {produto['url']}")
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
@@ -599,26 +673,6 @@ def preview_ficha():
     except Exception as e:
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao processar a pré-visualização"), 500
-
-@app.route('/nova_ficha')
-def nova_ficha():
-    """Exibe o formulário para cadastrar uma nova ficha"""
-    return render_template('form_ficha.html', bairros=BAIRROS)
-
-
-@app.route('/cadastrar_ficha', methods=['POST'])
-def cadastrar_ficha():
-    """Rota para cadastrar a ficha após a pré-visualização"""
-    try:
-        # Aqui você colocaria a lógica para inserir no banco de dados
-        # Similar ao que você já tem na rota de upload_produto do código antigo
-
-        # Após cadastrar, redireciona para a lista de fichas
-        return redirect(url_for('lista_fichas'))
-
-    except Exception as e:
-        logger.error(f"Erro ao cadastrar ficha: {str(e)}")
-        return render_template('erro.html', mensagem="Ocorreu um erro ao cadastrar a ficha"), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
