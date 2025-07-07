@@ -2,7 +2,6 @@ import os
 import re
 import random
 import urllib
-from telnetlib import EC
 import requests
 import io
 import base64
@@ -24,7 +23,6 @@ from selenium.common.exceptions import WebDriverException
 import phpserialize
 import math
 import urllib.parse
-from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Configuração de logging
@@ -111,7 +109,6 @@ DB_CONFIG = {
     'pool_reset_session': True
 }
 
-
 # Classe para buscar produtos por imagem no Google Lens
 class ProdutoFinder:
     def __init__(self):
@@ -124,65 +121,227 @@ class ProdutoFinder:
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/125.0'
         ]
 
-    def _extract_price_robust(self, element):
-        """Método robusto para extrair preço com múltiplos seletores"""
-        price_selectors = [
-            ".//span[contains(@class, 'e10twf')]",  # Google Lens
-            ".//span[contains(@class, 'a8Pemb')]",  # Google Shopping
-            ".//span[contains(@class, 'T14wmb')]",  # Alternativo 1
-            ".//span[contains(@class, 'HRLxBb')]",  # Alternativo 2
-            ".//span[contains(@class, 'price')]",  # Genérico
-            ".//span[contains(@aria-label, 'R$')]",  # Por texto R$
-            ".//span[contains(text(), 'R$')]",  # Por texto R$
-            ".//div[contains(@class, 'price')]",  # Div com classe price
-            ".//div[contains(@class, 'e10twf')]",  # Div com classe e10twf
-            ".//div[contains(@class, 'a8Pemb')]"  # Div com classe a8Pemb
-        ]
-
-        for selector in price_selectors:
-            try:
-                price_element = element.find_element(By.XPATH, selector)
-                price_text = price_element.text.strip()
-                if price_text:
-                    # Limpa o texto do preço
-                    price_text = price_text.replace('R$', '').replace('$', '').strip()
-                    return f"R$ {price_text}"
-            except:
-                continue
-
-        return "Preço não disponível"
-
-    def _extract_products_robust(self):
-        """Método robusto para extrair produtos"""
+    def _safe_extract(self, element, selector):
+        """Extrai texto de forma segura"""
         try:
-            # Espera até que a página esteja completamente carregada
-            time.sleep(5)
+            el = element.find_element(By.CSS_SELECTOR, selector)
+            return el.text.strip()
+        except:
+            return "Produto similar"
 
-            # Primeiro tenta extrair via JavaScript
+    def _safe_extract_img(self, element):
+        """Extrai imagem do elemento de forma segura"""
+        try:
+            img = element.find_element(By.XPATH, ".//img")
+            return img.get_attribute('src')
+        except:
+            return ""
+
+    def _safe_extract_url(self, element):
+        """Extrai URL do elemento de forma segura"""
+        try:
+            if element.tag_name == 'a':
+                return element.get_attribute('href')
+            link = element.find_element(By.XPATH, ".//a")
+            return link.get_attribute('href')
+        except:
+            return "#"
+
+    def _safe_extract_price(self, element):
+        """Extrai preço do elemento de forma segura com seletores atualizados"""
+        try:
+            price_selectors = [
+                ".//span[contains(@class, 'price')]",
+                ".//span[contains(@class, 'e10twf')]",
+                ".//span[contains(@class, 'a8Pemb')]",
+                ".//span[contains(@class, 'T14wmb')]",
+                ".//div[contains(@class, 'NRRPPb')]/span",
+                ".//span[contains(text(), 'R$') or contains(text(), '$') or contains(text(), 'USD')]",
+                ".//span[@aria-label='Price']",
+                ".//div[contains(@class, 'sh-np__product-price')]/span"
+            ]
+            for selector in price_selectors:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    price_text = el.text.strip()
+                    if price_text and ('$' in price_text or 'R$' in price_text or price_text[0].isdigit()):
+                        cleaned_price = re.sub(r'[^\d,.R$]', '', price_text)
+                        return cleaned_price if cleaned_price else "Preço não disponível"
+                except:
+                    continue
+            return "Preço não disponível"
+        except Exception as e:
+            logger.warning(f"Erro ao extrair preço: {str(e)}")
+            return "Preço não disponível"
+
+    def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
+        """Converte imagem para URL usando serviço ImgBB"""
+        try:
+            if image is not None:
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                optimal_size = (1000, 1000)
+                image.thumbnail(optimal_size, Image.LANCZOS)
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1.2)
+                image = image.filter(ImageFilter.SHARPEN)
+                img_buffer = io.BytesIO()
+                image.save(img_buffer, format='JPEG', quality=90)
+                img_buffer.seek(0)
+                files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+
+            elif image_data is not None:
+                try:
+                    img = Image.open(io.BytesIO(image_data))
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    optimal_size = (1000, 1000)
+                    img.thumbnail(optimal_size, Image.LANCZOS)
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(1.2)
+                    img = img.filter(ImageFilter.SHARPEN)
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='JPEG', quality=90)
+                    img_buffer.seek(0)
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                except Exception as img_error:
+                    logger.warning(f"Failed to process image data: {str(img_error)}")
+                    files = {'image': ('image.jpg', image_data, 'image/jpeg')}
+
+            elif image_url is not None:
+                headers = {
+                    'User-Agent': random.choice(self.user_agents),
+                    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                    'Referer': 'https://mude.ind.br/',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                }
+                for attempt in range(3):
+                    try:
+                        response = requests.get(image_url, headers=headers, timeout=10 * (attempt + 1))
+                        if response.status_code == 200:
+                            break
+                    except Exception as req_error:
+                        logger.warning(f"Attempt {attempt + 1} failed: {str(req_error)}")
+                        if attempt < 2:
+                            time.sleep(2)
+                if response.status_code != 200:
+                    logger.error(f"Error downloading image: {response.status_code}")
+                    return image_url
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    optimal_size = (1000, 1000)
+                    img.thumbnail(optimal_size, Image.LANCZOS)
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(1.2)
+                    img = img.filter(ImageFilter.SHARPEN)
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='JPEG', quality=90)
+                    img_buffer.seek(0)
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                except Exception as proc_error:
+                    logger.warning(f"Failed to process downloaded image: {str(proc_error)}")
+                    files = {'image': ('image.jpg', response.content, 'image/jpeg')}
+
+            else:
+                logger.error("No valid image input provided.")
+                return None
+
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    response = requests.post(
+                        'https://api.imgbb.com/1/upload',
+                        params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                        files=files,
+                        timeout=30
+                    )
+                    if response.status_code == 200 and 'data' in response.json() and 'url' in response.json()['data']:
+                        url = response.json()['data']['url']
+                        logger.info(f"Image converted to URL: {url}")
+                        return url
+                    logger.error(f"Error uploading image: {response.status_code} - {response.text}")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < retries - 1:
+                        time.sleep(2)
+
+            if image_url:
+                return image_url
+            return None
+
+        except Exception as e:
+            logger.error(f"Error converting image: {str(e)}")
+            return image_url if image_url else None
+
+    def _extract_with_javascript(self):
+        """Fallback com extração via JavaScript"""
+        try:
+            return self.driver.execute_script("""
+                const results = [];
+                const containers = document.querySelectorAll(
+                    'div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc, div.kb0PBd.cvP2Ce'
+                );
+                containers.forEach(container => {
+                    try {
+                        const titleEl = container.querySelector('h3, h4, [role="heading"], [class*="title"], [class*="header"]');
+                        const priceEl = container.querySelector(
+                            'span[class*="price"], span[class*="e10twf"], span[class*="a8Pemb"], span[class*="T14wmb"], ' +
+                            'span[aria-label="Price"], div[class*="NRRPPb"] span, span[contains(text(), "R$")]'
+                        );
+                        const linkEl = container.querySelector('a');
+                        const imgEl = container.querySelector('img');
+                        if (titleEl || linkEl) {
+                            results.push({
+                                nome: titleEl?.innerText?.trim() || 'Produto similar',
+                                preco: priceEl?.innerText?.trim() || 'Preço não disponível',
+                                url: linkEl?.href || '#',
+                                img: imgEl?.src || ''
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error extracting product:', e);
+                    }
+                });
+                return results.slice(0, 5);
+            """) or []
+        except Exception as e:
+            logger.error(f"Erro na extração com JavaScript: {str(e)}")
+            return []
+
+    def _extract_products_selenium(self):
+        """Método robusto para extração de produtos em 2025"""
+        try:
+            print(f"\nURL atual: {self.driver.current_url}")
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc], div.srKDX.cvP2Ce"))
+            )
+            for y in [300, 600, 900]:
+                self.driver.execute_script(f"window.scrollTo(0, {y});")
+                time.sleep(1.5)
             produtos = self._extract_with_javascript()
             if produtos:
                 return produtos
-
-            # Se JavaScript não retornou resultados, tenta XPath
             selectors = [
-                "//div[contains(@class, 'sh-dgr__grid-result')]",  # Google Shopping
-                "//div[contains(@class, 'Lv3Kxc')]",  # Google Lens
-                "//div[contains(@class, 'PJLMUc')]",  # Alternativo 1
-                "//a[contains(@class, 'UAQDqe')]",  # Alternativo 2
-                "//div[@data-product]",  # Genérico
-                "//div[contains(@class, 'commercial-unit')]"
+                "//div[contains(@class, 'sh-dgr__grid-result')]",
+                "//div[contains(@class, 'Lv3Kxc')]",
+                "//div[contains(@class, 'kb0PBd cvP2Ce')]",
+                "//div[@role='listitem']",
+                "//div[@data-product]"
             ]
-
-            produtos = []
             for selector in selectors:
                 try:
                     elements = self.driver.find_elements(By.XPATH, selector)
                     if elements:
-                        for element in elements[:5]:  # Limita a 5 resultados
+                        produtos = []
+                        for element in elements[:5]:
                             try:
                                 produto = {
                                     "nome": self._safe_extract_text(element),
-                                    "preco": self._extract_price_robust(element),  # Usando o novo método
+                                    "preco": self._safe_extract_price(element),
                                     "url": self._safe_extract_url(element),
                                     "img": self._safe_extract_img(element)
                                 }
@@ -191,92 +350,170 @@ class ProdutoFinder:
                             except Exception as e:
                                 logger.warning(f"Erro ao extrair produto: {str(e)}")
                                 continue
+                        if produtos:
+                            return produtos
+                except Exception as e:
+                    logger.warning(f"Seletor {selector} não encontrado: {str(e)}")
+                    continue
+            return []
+        except Exception as e:
+            print(f"Erro na extração principal: {str(e)}")
+            return self._extract_products_alternative()
 
-                        if produtos:  # Se encontrou produtos, para de tentar outros seletores
+    def _safe_extract_text(self, element):
+        """Extrai texto do elemento de forma segura"""
+        try:
+            for selector in [".//h3", ".//h4", ".//div[contains(@class, 'title')]", ".//div[contains(@class, 'header')]"]:
+                try:
+                    el = element.find_element(By.XPATH, selector)
+                    text = el.text.strip()
+                    if text:
+                        return text
+                except:
+                    continue
+            return "Produto similar"
+        except:
+            return "Produto similar"
+
+    def _safe_extract_attr(self, element, selector, attribute):
+        """Extrai atributo de forma segura"""
+        try:
+            el = element.find_element(By.CSS_SELECTOR, selector)
+            return el.get_attribute(attribute)
+        except:
+            return "#"
+
+    def _extract_products_alternative(self):
+        """Método alternativo quando o principal falha"""
+        try:
+            produtos = []
+            elements = self.driver.find_elements(By.CSS_SELECTOR, "div[role='listitem'], div[role='article']")
+            for element in elements[:5]:
+                try:
+                    produto = {
+                        "nome": element.find_element(By.CSS_SELECTOR, "[role='heading']").text,
+                        "preco": self._safe_extract_price(element),
+                        "url": element.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
+                        "img": element.find_element(By.CSS_SELECTOR, "img").get_attribute("src")
+                    }
+                    produtos.append(produto)
+                except:
+                    continue
+            return produtos if produtos else []
+        except:
+            return []
+
+    def _initialize_driver(self):
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--window-size=1280,720")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
+        try:
+            self.driver = webdriver.Chrome(
+                service=Service(executable_path='/usr/bin/chromedriver'),
+                options=chrome_options
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
+            return False
+
+    def _extract_from_lens_page(self):
+        """Extrai produtos diretamente da página do Google Lens"""
+        produtos = []
+        try:
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.srKDX.cvP2Ce"))
+            )
+            container = self.driver.find_element(By.CSS_SELECTOR, "div.srKDX.cvP2Ce")
+            product_elements = container.find_elements(By.CSS_SELECTOR, "div.kb0PBd.cvP2Ce")[:10]
+            for product in product_elements:
+                try:
+                    produto = {
+                        "nome": self._safe_extract(product, "div[role='heading']"),
+                        "preco": self._safe_extract_price(product),
+                        "url": self._safe_extract_attr(product, "a", "href"),
+                        "img": self._safe_extract_attr(product, "img", "src")
+                    }
+                    if (produto["nome"] and
+                            produto["url"] and
+                            not produto["url"].startswith((
+                                "https://lens.google.com",
+                                "http://lens.google.com",
+                                "https://www.google.com",
+                                "http://www.google.com"
+                            )) and
+                            not produto["url"].split('://')[1].split('/')[0].endswith(
+                                ('google.com', 'googleapis.com'))):
+                        produtos.append(produto)
+                        if len(produtos) >= 5:
                             break
                 except Exception as e:
+                    print(f"Erro ao extrair produto: {str(e)}")
                     continue
-
             return produtos
-
         except Exception as e:
-            logger.error(f"Erro na extração robusta: {str(e)}")
+            print(f"Erro na extração da página do Lens: {str(e)}")
             return []
 
-    def _extract_with_javascript(self):
-        """Fallback com JavaScript para extração mais robusta"""
+    def buscar_produtos_por_url(self, image_url):
+        """Busca produtos no Google Lens com extração robusta"""
+        print(f"\n=== Iniciando busca para imagem: {image_url} ===")
+        if not self._initialize_driver():
+            print("Falha ao inicializar o driver")
+            return []
         try:
-            return self.driver.execute_script("""
-                const results = [];
-                const containers = document.querySelectorAll(
-                    'div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc'
-                );
-
-                containers.forEach(container => {
-                    try {
-                        // Extrai nome
-                        const nameEl = container.querySelector('h3, h4, [class*="title"], [class*="header"]');
-                        const name = nameEl?.innerText?.trim() || 'Produto similar';
-
-                        // Extrai preço - tentando vários seletores
-                        let price = 'Preço não disponível';
-                        const priceSelectors = [
-                            'span[class*="price"]',
-                            'span[class*="e10twf"]',
-                            'span[class*="a8Pemb"]',
-                            'span[aria-label*="R$"]',
-                            'span:contains("R$")',
-                            'div[class*="price"]'
-                        ];
-
-                        for (const selector of priceSelectors) {
-                            const el = container.querySelector(selector);
-                            if (el && el.innerText.trim()) {
-                                price = el.innerText.trim().replace('R$', '').replace('$', '').trim();
-                                price = 'R$ ' + price;
-                                break;
-                            }
-                        }
-
-                        // Extrai URL
-                        const linkEl = container.querySelector('a');
-                        const url = linkEl?.href || '#';
-
-                        // Extrai imagem
-                        const imgEl = container.querySelector('img');
-                        const img = imgEl?.src || '';
-
-                        if (name && url) {
-                            results.push({
-                                nome: name,
-                                preco: price,
-                                url: url,
-                                img: img
-                            });
-                        }
-                    } catch (e) {
-                        console.error('Error extracting product:', e);
-                    }
-                });
-
-                return results.slice(0, 5);  // Retorna no máximo 5 produtos
-            """) or []
+            encoded_url = urllib.parse.quote(image_url)
+            search_url = f"https://lens.google.com/uploadbyurl?url={encoded_url}"
+            print(f"\nURL de busca no Google Lens: {search_url}")
+            self.driver.get(search_url)
+            time.sleep(8)
+            try:
+                shopping_tab = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Shopping')]"))
+                )
+                shopping_tab.click()
+                time.sleep(3)
+            except Exception as e:
+                print(f"Não encontrou aba Shopping: {str(e)}")
+            current_url = self.driver.current_url
+            print(f"\nURL atual após redirecionamento: {current_url}")
+            produtos = self._extract_products_selenium()
+            if not produtos:
+                produtos = self._extract_from_lens_page()
+            print(f"\n=== Resultados encontrados ===")
+            for i, p in enumerate(produtos, 1):
+                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+            return produtos
         except Exception as e:
-            logger.error(f"Erro na extração com JavaScript: {str(e)}")
+            print(f"\nErro durante a busca: {str(e)}")
             return []
+        finally:
+            self.cleanup()
+            print("\n=== Busca concluída ===")
+
+    def cleanup(self):
+        """Encerra o driver de forma segura"""
+        try:
+            if self.driver:
+                self.driver.quit()
+                print("Driver encerrado com sucesso")
+        except Exception as e:
+            print(f"Erro ao encerrar driver: {str(e)}")
+        finally:
+            self.driver = None
 
 finder = ProdutoFinder()
 
-# Função para obter uma conexão com o banco de dados
 def get_db_connection():
     max_retries = 3
     retry_delay = 5
-
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1} de conexão com o MySQL em {DB_CONFIG['host']}")
-
-            # Adicionando parâmetros para evitar "Unread result found"
             connection = mysql.connector.connect(
                 host=DB_CONFIG['host'],
                 port=DB_CONFIG['port'],
@@ -285,105 +522,74 @@ def get_db_connection():
                 database=DB_CONFIG['database'],
                 connection_timeout=30,
                 connect_timeout=30,
-                consume_results=True,  # Importante para evitar "Unread result found"
+                consume_results=True,
                 autocommit=True
             )
-
-            # Teste de conexão mais robusto
-            cursor = connection.cursor(buffered=True)  # Usando cursor buffered
+            cursor = connection.cursor(buffered=True)
             cursor.execute("SELECT 1")
-            cursor.fetchall()  # Garantindo que todos os resultados são lidos
+            cursor.fetchall()
             cursor.close()
-
             logger.info("Conexão com MySQL estabelecida com sucesso")
             return connection
-
         except mysql.connector.Error as err:
             logger.error(f"Erro ao conectar ao MySQL (tentativa {attempt + 1}): {err}")
-            if err.errno == mysql.connector.errorcode.ER_UNKNOWN_ERROR and "Unread result found" in str(err):
-                logger.warning("Tentando reconectar após 'Unread result found'...")
-                time.sleep(retry_delay)
-                continue
-
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
-
         except Exception as e:
             logger.error(f"Erro inesperado ao conectar ao MySQL: {str(e)}")
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
-
     logger.error("Falha ao conectar ao MySQL após várias tentativas")
     return None
 
-    # Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('logged_in'):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-
     return decorated_function
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-
-        # Validação simples (substitua por uma lógica de autenticação real)
         if username == 'admin' and password == 'admin123':
-            session['logged_in'] = True  # Define a sessão como logada
+            session['logged_in'] = True
             return redirect(url_for('lista_fichas'))
         else:
             return "Usuário ou senha inválidos", 401
-
     return render_template('login.html')
-
 
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)  # Remove o status de logado da sessão
+    session.pop('logged_in', None)
     return redirect(url_for('login'))
-
 
 @app.route('/')
 @login_required
 def lista_fichas():
     """Página principal que lista todas as fichas com paginação"""
     status_filtro = request.args.get('status')
-
-    # Parâmetros de paginação
-    page = request.args.get('page', 1, type=int)  # Página atual (padrão: 1)
-    per_page = 15  # Itens por página
-
+    page = request.args.get('page', 1, type=int)
+    per_page = 15
     try:
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
-
         cursor = conn.cursor(dictionary=True)
-
-        # Consulta para contar o total de registros (para paginação)
         count_sql = """
         SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta
         """
-
         if status_filtro:
             count_sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
             cursor.execute(count_sql, (status_filtro,))
         else:
             cursor.execute(count_sql)
-
         total_records = cursor.fetchone()['total']
         total_pages = math.ceil(total_records / per_page)
-
-        # Cálculo do offset para paginação
         offset = (page - 1) * per_page
-
-        # Consulta SQL para listar as fichas com paginação
         sql = """
         SELECT
             entry_id AS id,
@@ -406,7 +612,6 @@ def lista_fichas():
             MAX(CASE WHEN meta_key = 'upload-1' THEN meta_value END) AS arquivo
         FROM frmt_form_entry_meta
         """
-
         if status_filtro:
             sql += " HAVING status = %s"
             sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
@@ -414,9 +619,7 @@ def lista_fichas():
         else:
             sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
             cursor.execute(sql, (per_page, offset))
-
         fichas = cursor.fetchall()
-
         for ficha in fichas:
             if ficha['arquivo']:
                 try:
@@ -428,18 +631,13 @@ def lista_fichas():
                     ficha['arquivo_url'] = None
             else:
                 ficha['arquivo_url'] = None
-
         cursor.close()
         conn.close()
-
-        # Calcular os valores para paginação
         start_page = page - 2 if page > 2 else 1
         end_page = start_page + 4
         if end_page > total_pages:
             end_page = total_pages
             start_page = end_page - 4 if end_page > 4 else 1
-
-        # Passando dados de paginação para o template
         pagination = {
             'page': page,
             'per_page': per_page,
@@ -448,13 +646,10 @@ def lista_fichas():
             'start_page': start_page,
             'end_page': end_page
         }
-
         return render_template('lista_fichas.html', fichas=fichas, pagination=pagination, status_filtro=status_filtro)
-
     except Exception as e:
         logger.error(f"Erro ao listar fichas: {str(e)}")
         return f"Erro ao processar a solicitação: {str(e)}", 500
-
 
 @app.route('/detalhes/<int:id>')
 @login_required
@@ -464,10 +659,7 @@ def detalhes_ficha(id):
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
-
         cursor = conn.cursor(dictionary=True)
-
-        # Consulta SQL para obter detalhes da ficha
         sql = """
         SELECT
             entry_id AS id,
@@ -492,16 +684,12 @@ def detalhes_ficha(id):
         WHERE entry_id = %s
         GROUP BY entry_id
         """
-
         cursor.execute(sql, (id,))
         ficha = cursor.fetchone()
-
         if not ficha:
             cursor.close()
             conn.close()
             return "Ficha não encontrada", 404
-
-        # Processar informação de arquivo (imagem)
         if ficha.get('arquivo'):
             try:
                 dados_serializados = ficha['arquivo'].encode('utf-8')
@@ -512,22 +700,23 @@ def detalhes_ficha(id):
                 ficha['arquivo_url'] = None
         else:
             ficha['arquivo_url'] = None
-
-        # Buscar produtos similares usando a imagem (se disponível)
         if ficha.get('arquivo_url'):
             print(f"\nIniciando busca para imagem: {ficha['arquivo_url']}")
-
             finder = ProdutoFinder()
             try:
                 produtos = finder.buscar_produtos_por_url(ficha['arquivo_url'])
-                ficha['produtos_similares'] = produtos or []  # Garante lista vazia se None
-
-                # Debug adicional
-                if not produtos:
+                ficha['produtos_similares'] = [
+                    {
+                        'nome': p['nome'],
+                        'preco': p['preco'] if p['preco'] != 'Preço não disponível' else 'Consultar',
+                        'url': p['url'],
+                        'img': p['img']
+                    } for p in produtos if p['nome'] and p['url']
+                ]
+                if not ficha['produtos_similares']:
                     print("Nenhum produto similar encontrado")
                 else:
-                    print(f"Encontrados {len(produtos)} produtos similares")
-
+                    print(f"Encontrados {len(ficha['produtos_similares'])} produtos similares")
             except Exception as e:
                 print(f"Erro na busca: {str(e)}")
                 ficha['produtos_similares'] = []
@@ -536,53 +725,34 @@ def detalhes_ficha(id):
         else:
             ficha['produtos_similares'] = []
             print("Nenhuma URL de imagem disponível para busca")
-
-        # ficha['produtos_similares'] = produtos_similares or []
-
-        # Cálculo do valor estimado e outras informações (com tratamento para valores nulos)
         try:
             valor_estimado = float(ficha.get('valor', '0'))
         except (ValueError, TypeError):
             valor_estimado = 0.0
-
         valor_estimado = valor_estimado * 1.05
-
-        # Adiciona os valores calculados à ficha
         ficha['valorEstimado'] = float(valor_estimado)
-        ficha['demandaMedia'] = float(valor_estimado * 1.05)  # +5%
-        ficha['demandaAlta'] = float(valor_estimado * 1.10)  # +10%
-
-        # Formatar data de compra para o formato brasileiro
+        ficha['demandaMedia'] = float(valor_estimado * 1.05)
+        ficha['demandaAlta'] = float(valor_estimado * 1.10)
         if ficha.get('dataDeCompra'):
             try:
-                # Tenta parsear a data para formato brasileiro
                 data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
                 ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
             except ValueError:
                 try:
-                    # Tenta parsear caso já esteja no formato DD/MM/YYYY
                     datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
                 except ValueError:
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
         else:
             ficha['dataDeCompra_br'] = None
-
-        # Garantir valores padrão para dimensões
         ficha['altura'] = ficha.get('altura', '0')
         ficha['largura'] = ficha.get('largura', '0')
         ficha['profundidade'] = ficha.get('profundidade', '0')
-
         cursor.close()
         conn.close()
-
         return render_template('detalhes_ficha.html', ficha=ficha)
-
-
     except Exception as e:
-
         print(f"\nERRO GRAVE: {str(e)}")
-
         return render_template('erro.html', mensagem="Ocorreu um erro ao processar a ficha"), 500
 
 @app.route('/atualizar_status/<int:id>', methods=['POST'])
@@ -590,32 +760,24 @@ def detalhes_ficha(id):
 def atualizar_status(id):
     """Rota para atualizar o status de uma ficha"""
     novo_status = request.form['status']
-
     try:
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
-
         cursor = conn.cursor()
-
-        # Atualizar o status na tabela
         sql = """
         UPDATE frmt_form_entry_meta
         SET meta_value = %s
         WHERE entry_id = %s AND meta_key = 'radio-3'
         """
-
         cursor.execute(sql, (novo_status, id))
         conn.commit()
         cursor.close()
         conn.close()
-
         return redirect(url_for('detalhes_ficha', id=id))
-
     except Exception as e:
         logger.error(f"Erro ao atualizar status: {str(e)}")
         return f"Erro ao processar a solicitação: {str(e)}", 500
-
 
 @app.route('/test-db')
 def test_db():
@@ -658,12 +820,10 @@ def test_db():
             }
         }
 
-
 @app.route('/preview_ficha', methods=['POST'])
 def preview_ficha():
     """Rota para visualizar os dados do formulário antes de cadastrar"""
     try:
-        # Coleta dos dados do formulário
         form_data = {
             'nome': request.form.get('nome', ''),
             'cpf': request.form.get('cpf', ''),
@@ -691,8 +851,6 @@ def preview_ficha():
             'imagem_url': None,
             'produtos_similares': []
         }
-
-        # Processar imagem
         if 'imagem' in request.files:
             imagem = request.files['imagem']
             if imagem.filename != '':
@@ -700,18 +858,20 @@ def preview_ficha():
                     img = Image.open(imagem)
                     img_url = finder._convert_image_to_url(image=img)
                     form_data['imagem_url'] = img_url
-
-                    # Buscar produtos similares
                     if img_url:
-                        form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
+                        produtos = finder.buscar_produtos_por_url(img_url)
+                        form_data['produtos_similares'] = [
+                            {
+                                'nome': p['nome'],
+                                'preco': p['preco'] if p['preco'] != 'Preço não disponível' else 'Consultar',
+                                'url': p['url'],
+                                'img': p['img']
+                            } for p in produtos if p['nome'] and p['url']
+                        ]
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
-
-        # Converter bairro ID para nome
         form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
-
-        # Formatar data
         if form_data['data_compra']:
             try:
                 data_obj = datetime.strptime(form_data['data_compra'], '%Y-%m-%d')
@@ -720,15 +880,11 @@ def preview_ficha():
                 form_data['data_compra_br'] = form_data['data_compra']
         else:
             form_data['data_compra_br'] = "Não informada"
-
-        # Calcular valores estimados
         valor_estimado = form_data['valor'] * 1.05
         form_data['valorEstimado'] = valor_estimado
         form_data['demandaMedia'] = valor_estimado * 1.05
         form_data['demandaAlta'] = valor_estimado * 1.10
-
         return render_template('preview_ficha.html', ficha=form_data)
-
     except Exception as e:
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao processar a pré-visualização"), 500
@@ -738,17 +894,11 @@ def nova_ficha():
     """Exibe o formulário para cadastrar uma nova ficha"""
     return render_template('form_ficha.html', bairros=BAIRROS)
 
-
 @app.route('/cadastrar_ficha', methods=['POST'])
 def cadastrar_ficha():
     """Rota para cadastrar a ficha após a pré-visualização"""
     try:
-        # Aqui você colocaria a lógica para inserir no banco de dados
-        # Similar ao que você já tem na rota de upload_produto do código antigo
-
-        # Após cadastrar, redireciona para a lista de fichas
         return redirect(url_for('lista_fichas'))
-
     except Exception as e:
         logger.error(f"Erro ao cadastrar ficha: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao cadastrar a ficha"), 500
