@@ -155,37 +155,18 @@
         {% if ficha.produtos_similares %}
         <div class="p-6 border-b border-gray-200">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Produtos Similares Encontrados</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {% for produto in ficha.produtos_similares %}
-                <div class="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                    <div class="flex justify-center mb-3">
-                        {% if produto.img %}
-                        <img src="{{ produto.img }}" alt="{{ produto.nome }}"
-                             class="h-32 w-full object-contain">
-                        {% else %}
-                        <div class="h-32 w-full bg-gray-100 flex items-center justify-center">
-                            <span class="text-gray-400">Sem imagem</span>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <h3 class="font-medium text-gray-900 truncate">{{ produto.nome }}</h3>
-                    <p class="text-green-600 font-semibold">{{ produto.preco }}</p>
-                    <div class="mt-2 flex justify-between items-center">
-                        <span class="text-xs bg-gray-100 px-2 py-1 rounded">
-                            {{ produto.fonte }}
-                        </span>
-                        <a href="{{ produto.url }}" target="_blank"
-                           class="text-sm text-green-600 hover:text-green-800 hover:underline">
-                            Ver produto
-                        </a>
-                    </div>
+                <div class="border rounded-lg p-4">
+                    {% if produto.img %}
+                    <img src="{{ produto.img }}" alt="{{ produto.nome }}" class="w-full h-32 object-contain mb-2">
+                    {% endif %}
+                    <h3 class="font-medium">{{ produto.nome }}</h3>
+                    <p class="text-sm text-gray-600">{{ produto.preco }}</p>
+                    <a href="{{ produto.url }}" target="_blank" class="text-sm text-green-600 hover:text-green-800">Ver produto</a>
                 </div>
                 {% endfor %}
             </div>
-        </div>
-        {% else %}
-        <div class="p-6 border-b border-gray-200">
-            <p class="text-gray-500">Nenhum produto similar encontrado.</p>
         </div>
         {% endif %}
 
