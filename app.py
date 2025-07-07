@@ -18,7 +18,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import WebDriverException
 import phpserialize
 import math
@@ -122,7 +121,6 @@ class ProdutoFinder:
         ]
 
     def _initialize_driver(self):
-        """Inicializa o WebDriver usando webdriver_manager para gerenciar o ChromeDriver."""
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -133,12 +131,10 @@ class ProdutoFinder:
         os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
 
         try:
-            # Usar webdriver_manager para instalar o ChromeDriver automaticamente
             self.driver = webdriver.Chrome(
-                service=Service(ChromeDriverManager().install()),
+                service=Service(executable_path='/usr/bin/chromedriver'),
                 options=chrome_options
             )
-            logger.info("WebDriver inicializado com sucesso")
             return True
         except Exception as e:
             logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
