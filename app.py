@@ -123,6 +123,56 @@ class ProdutoFinder:
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/125.0'
         ]
 
+    def _fetch_price_from_url(self, product_url):
+        """Tenta extrair o preço diretamente da página do produto."""
+        try:
+            # Inicializa um novo driver se necessário
+            if not self.driver and not self._initialize_driver():
+                logger.error("Falha ao inicializar o driver para busca de preço")
+                return "Preço não disponível"
+
+            # Acessa a página do produto
+            self.driver.get(product_url)
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            # Lista de seletores comuns para preços em páginas de varejo
+            price_selectors = [
+                "//span[contains(@class, 'price') or contains(@class, 'preco') or contains(@class, 'valor')]",
+                "//div[contains(@class, 'price') or contains(@class, 'preco') or contains(@class, 'valor')]",
+                "//span[contains(text(), 'R$') or contains(text(), '$')]",
+                "//div[contains(text(), 'R$') or contains(text(), '$')]",
+                "//meta[@property='og:price:amount']/@content",
+                "//span[@itemprop='price']",
+                "//div[@data-testid='price-value']",
+                "//span[contains(@class, 'final-price') or contains(@class, 'current-price')]"
+            ]
+
+            for selector in price_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    for element in elements:
+                        price_text = element.text.strip() or element.get_attribute('content')
+                        if price_text and self._is_valid_price_text(price_text):
+                            return price_text
+                except:
+                    continue
+
+            # Fallback: busca por regex no texto da página
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+', page_text)
+            if price_match:
+                return price_match.group(0)
+
+            return "Preço não disponível"
+        except Exception as e:
+            logger.error(f"Erro ao buscar preço na URL {product_url}: {str(e)}")
+            return "Preço não disponível"
+        finally:
+            # Evita fechar o driver aqui para reutilizá-lo
+            pass
+
     def _extract_products_robust(self):
         """Método robusto para extrair produtos com múltiplas estratégias"""
         try:
@@ -204,7 +254,7 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """CORREÇÃO: Extrai preço do elemento de forma mais robusta"""
+        """Extrai preço do elemento de forma mais robusta, com fallback para URL."""
         try:
             # Lista expandida de seletores para preços
             price_selectors = [
@@ -242,8 +292,14 @@ class ProdutoFinder:
             except:
                 pass
 
+            # Fallback: tenta buscar na URL do produto
+            product_url = self._safe_extract_url(element)
+            if product_url and product_url != "#":
+                return self._fetch_price_from_url(product_url)
+
             return "Preço não disponível"
-        except:
+        except Exception as e:
+            logger.error(f"Erro ao extrair preço: {str(e)}")
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
@@ -1947,6 +2003,7 @@ def preview_ficha():
             'imagem_url': None,
             'produtos_similares': []
         }
+
         # Processar imagem
         if 'imagem' in request.files:
             imagem = request.files['imagem']
@@ -1958,9 +2015,14 @@ def preview_ficha():
                     # Buscar produtos similares
                     if img_url:
                         form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
+                        # Verificar e buscar preços faltantes
+                        for produto in form_data['produtos_similares']:
+                            if produto['preco'] == "Preço não disponível" and produto['url'] != "#":
+                                produto['preco'] = finder._fetch_price_from_url(produto['url'])
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
+
         # Converter bairro ID para nome
         form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
         # Formatar data
