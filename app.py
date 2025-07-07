@@ -17,6 +17,7 @@ from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import time
+from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -124,54 +125,51 @@ class ProdutoFinder:
         ]
 
     def _fetch_price_from_url(self, product_url):
-        """Tenta extrair o preço diretamente da página do produto."""
+        """Tenta extrair o preço diretamente da página do produto usando requests."""
         try:
-            # Inicializa um novo driver se necessário
-            if not self.driver and not self._initialize_driver():
-                logger.error("Falha ao inicializar o driver para busca de preço")
-                return "Preço não disponível"
+            headers = {
+                'User-Agent': random.choice(self.user_agents),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/'
+            }
+            response = requests.get(product_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Acessa a página do produto
-            self.driver.get(product_url)
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-
-            # Lista de seletores comuns para preços em páginas de varejo
+            # Seletores comuns para preços em páginas de varejo
             price_selectors = [
-                "//span[contains(@class, 'price') or contains(@class, 'preco') or contains(@class, 'valor')]",
-                "//div[contains(@class, 'price') or contains(@class, 'preco') or contains(@class, 'valor')]",
-                "//span[contains(text(), 'R$') or contains(text(), '$')]",
-                "//div[contains(text(), 'R$') or contains(text(), '$')]",
-                "//meta[@property='og:price:amount']/@content",
-                "//span[@itemprop='price']",
-                "//div[@data-testid='price-value']",
-                "//span[contains(@class, 'final-price') or contains(@class, 'current-price')]"
+                'span[class*="price"], span[class*="preco"], span[class*="valor"]',
+                'div[class*="price"], div[class*="preco"], div[class*="valor"]',
+                'span:contains("R$"), div:contains("R$")',
+                'meta[property="og:price:amount"]',
+                'span[itemprop="price"]',
+                '[data-testid="price-value"]',
+                'span[class*="final-price"], span[class*="current-price"]'
             ]
 
             for selector in price_selectors:
                 try:
-                    elements = self.driver.find_elements(By.XPATH, selector)
-                    for element in elements:
-                        price_text = element.text.strip() or element.get_attribute('content')
+                    element = soup.select_one(selector)
+                    if element:
+                        price_text = element.get('content') or element.text.strip()
                         if price_text and self._is_valid_price_text(price_text):
+                            logger.info(f"Preço encontrado na URL {product_url}: {price_text}")
                             return price_text
                 except:
                     continue
 
             # Fallback: busca por regex no texto da página
-            page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+', page_text)
+            price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+', soup.text)
             if price_match:
+                logger.info(f"Preço extraído via regex na URL {product_url}: {price_match.group(0)}")
                 return price_match.group(0)
 
+            logger.warning(f"Preço não encontrado na URL {product_url}")
             return "Preço não disponível"
         except Exception as e:
             logger.error(f"Erro ao buscar preço na URL {product_url}: {str(e)}")
             return "Preço não disponível"
-        finally:
-            # Evita fechar o driver aqui para reutilizá-lo
-            pass
 
     def _extract_products_robust(self):
         """Método robusto para extrair produtos com múltiplas estratégias"""
@@ -254,49 +252,34 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento de forma mais robusta, com fallback para URL."""
+        """Extrai preço do elemento de forma robusta."""
         try:
-            # Lista expandida de seletores para preços
+            # Seletores simplificados e comuns para preços no Google Lens/Shopping
             price_selectors = [
-                ".//span[contains(@class, 'price')]",
-                ".//span[contains(@class, 'e10twf')]",
-                ".//span[contains(@class, 'a8Pemb')]",
-                ".//span[contains(@class, 'T14wmb')]",
-                ".//span[contains(@class, 'O8U6h')]",
-                ".//span[contains(@class, 'NRRPPb')]",
-                ".//div[contains(@class, 'price')]",
+                ".//span[contains(@class, 'a8Pemb')]",  # Preço principal no Google Shopping
                 ".//span[@aria-hidden='true']",
-                ".//span[contains(@class, 'notranslate')]",
-                ".//span[contains(text(), 'R$')]",
-                ".//div[contains(text(), 'R$')]",
-                ".//span[contains(text(), '$')]",
-                ".//div[contains(text(), '$')]"
+                ".//span[contains(text(), 'R$') or contains(text(), '$')]",
+                ".//div[contains(@class, 'price') or contains(@class, 'offer')]"
             ]
 
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
-                    # Verifica se realmente contém um preço
                     if price_text and self._is_valid_price_text(price_text):
+                        logger.info(f"Preço encontrado: {price_text}")
                         return price_text
                 except:
                     continue
 
-            # Se não encontrou com seletores, busca no texto completo
-            try:
-                full_text = element.text
-                price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+|€\s*[\d.,]+|£\s*[\d.,]+', full_text)
-                if price_match:
-                    return price_match.group(0)
-            except:
-                pass
+            # Busca no texto completo como fallback
+            full_text = element.text
+            price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+', full_text)
+            if price_match:
+                logger.info(f"Preço extraído via regex: {price_match.group(0)}")
+                return price_match.group(0)
 
-            # Fallback: tenta buscar na URL do produto
-            product_url = self._safe_extract_url(element)
-            if product_url and product_url != "#":
-                return self._fetch_price_from_url(product_url)
-
+            logger.warning("Preço não encontrado no elemento")
             return "Preço não disponível"
         except Exception as e:
             logger.error(f"Erro ao extrair preço: {str(e)}")
@@ -499,88 +482,62 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """CORREÇÃO: Método robusto para extração de produtos em 2024"""
+        """Método robusto para extração de produtos em 2025."""
         try:
-            # Mostra a URL atual para debug
             print(f"\nURL atual: {self.driver.current_url}")
-            # Espera pelo container principal
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc]"))
+            WebDriverWait(self.driver, 20).until(  # Aumentado para 20 segundos
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc], div.srKDX.cvP2Ce"))
             )
-            # Rolagem progressiva para carregar todos os elementos
-            for y in [300, 600, 900]:
+            # Rolagem progressiva
+            for y in [300, 600, 900, 1200]:
                 self.driver.execute_script(f"window.scrollTo(0, {y});")
-                time.sleep(1.5)
-            # Extrai os produtos usando JavaScript CORRIGIDO
-            produtos = self.driver.execute_script("""
-                const results = [];
-                const containers = document.querySelectorAll('div[data-snc]');
-                containers.forEach(container => {
-                    const products = container.querySelectorAll('div[data-snf]');
-                    products.forEach(product => {
-                        try {
-                            const name = product.querySelector('[role="heading"]')?.innerText?.trim();
+                time.sleep(2)
 
-                            // CORREÇÃO: Múltiplos seletores para preço
-                            let price = 'Preço não disponível';
-                            const priceSelectors = [
-                                'span[aria-hidden="true"]',
-                                '.e10twf',
-                                '.a8Pemb', 
-                                '.T14wmb',
-                                '.O8U6h',
-                                '.NRRPPb',
-                                '.notranslate',
-                                'span:contains("R$")',
-                                'div:contains("R$")',
-                                'span:contains("$")'
-                            ];
+            produtos = []
+            # Tenta extrair produtos com seletores atualizados
+            selectors = [
+                "div.srKDX.cvP2Ce div.kb0PBd.cvP2Ce",  # Google Lens
+                "div.sh-dgr__grid-result",  # Google Shopping
+                "div.pla-unit",
+                "div[role='listitem']"
+            ]
 
-                            for (const selector of priceSelectors) {
-                                const priceEl = product.querySelector(selector);
-                                if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
-                                    const priceText = priceEl.innerText.trim();
-                                    // Verifica se contém símbolos de moeda ou números
-                                    if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
-                                        price = priceText;
-                                        break;
-                                    }
+            for selector in selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        logger.info(f"Encontrados {len(elements)} elementos com seletor: {selector}")
+                        for element in elements[:5]:  # Limita a 5 resultados
+                            try:
+                                produto = {
+                                    "nome": self._safe_extract_text(element),
+                                    "preco": self._safe_extract_price(element),
+                                    "url": self._safe_extract_url(element),
+                                    "img": self._safe_extract_img(element)
                                 }
-                            }
+                                # Se o preço não foi encontrado, tenta o fallback
+                                if produto["preco"] == "Preço não disponível" and produto["url"] != "#":
+                                    produto["preco"] = self._fetch_price_from_url(produto["url"])
+                                if produto["nome"] and produto["url"]:
+                                    produtos.append(produto)
+                            except Exception as e:
+                                logger.warning(f"Erro ao extrair produto: {str(e)}")
+                                continue
+                        if produtos:
+                            break
+                except Exception as e:
+                    logger.warning(f"Seletor {selector} falhou: {str(e)}")
+                    continue
 
-                            // Se ainda não encontrou, busca no texto completo
-                            if (price === 'Preço não disponível') {
-                                const fullText = product.innerText || '';
-                                const priceMatch = fullText.match(/R\\$\\s*[\\d.,]+|\\$\\s*[\\d.,]+|€\\s*[\\d.,]+|£\\s*[\\d.,]+/);
-                                if (priceMatch) {
-                                    price = priceMatch[0];
-                                }
-                            }
-
-                            const link = product.querySelector('a')?.href;
-                            const image = product.querySelector('img')?.src;
-                            if (name && link) {
-                                results.push({
-                                    nome: name,
-                                    preco: price,
-                                    url: link,
-                                    img: image || ''
-                                });
-                            }
-                        } catch(e) {
-                            console.error('Error extracting product:', e);
-                        }
-                    });
-                });
-                return results.slice(0, 5); // Limita a 5 resultados
-            """)
             if not produtos:
-                print("Nenhum produto encontrado via JavaScript, tentando método alternativo...")
-                return self._extract_products_alternative()
-            return produtos
+                logger.info("Nenhum produto encontrado, tentando JavaScript...")
+                produtos = self._extract_with_javascript()
+
+            logger.info(f"Total de produtos encontrados: {len(produtos)}")
+            return produtos[:5]
         except Exception as e:
-            print(f"Erro na extração principal: {str(e)}")
-            return self._extract_products_alternative()
+            logger.error(f"Erro na extração principal: {str(e)}")
+            return []
 
     def _extract_products_alternative(self):
         """Método alternativo quando o principal falha"""
@@ -1119,33 +1076,43 @@ class ProdutoFinder:
             return []
 
     def buscar_produtos_por_url(self, image_url):
-        """CORREÇÃO: Busca produtos no Google Lens focando na extração direta dos elementos"""
-        print(f"\n=== Iniciando busca para imagem: {image_url} ===")
+        """Busca produtos no Google Lens com extração direta."""
+        logger.info(f"\n=== Iniciando busca para imagem: {image_url} ===")
         if not self._initialize_driver():
-            print("Falha ao inicializar o driver")
+            logger.error("Falha ao inicializar o driver")
             return []
         try:
             encoded_url = urllib.parse.quote(image_url)
             search_url = f"https://lens.google.com/uploadbyurl?url={encoded_url}"
-            print(f"\nURL de busca no Google Lens: {search_url}")
+            logger.info(f"URL de busca no Google Lens: {search_url}")
             self.driver.get(search_url)
-            time.sleep(8)  # Espera inicial maior
-            # Capturar a URL atual após redirecionamento
-            current_url = self.driver.current_url
-            print(f"\nURL atual após redirecionamento: {current_url}")
-            # Extrair produtos diretamente da página do Google Lens
-            produtos = self._extract_from_lens_page()
-            # Debug final
-            print(f"\n=== Resultados encontrados ===")
+            time.sleep(10)  # Aumentado para garantir carregamento
+            # Tenta clicar na aba Shopping
+            try:
+                shopping_tab = WebDriverWait(self.driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Shopping')]"))
+                )
+                shopping_tab.click()
+                time.sleep(5)
+                logger.info("Aba Shopping clicada com sucesso")
+            except Exception as e:
+                logger.warning(f"Não encontrou aba Shopping: {str(e)}")
+            # Extrair produtos
+            produtos = self._extract_products_selenium()
+            if not produtos:
+                logger.info("Nenhum produto encontrado via Selenium, tentando alternativa...")
+                produtos = self._extract_products_alternative()
+            # Log final
+            logger.info(f"\n=== Resultados encontrados: {len(produtos)} ===")
             for i, p in enumerate(produtos, 1):
-                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+                logger.info(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
             return produtos
         except Exception as e:
-            print(f"\nErro durante a busca: {str(e)}")
+            logger.error(f"Erro durante a busca: {str(e)}")
             return []
         finally:
             self.cleanup()
-            print("\n=== Busca concluída ===")
+            logger.info("\n=== Busca concluída ===")
 
     def _extract_products_from_lens_url(self, lens_url):
         """Método especializado para extrair produtos de uma URL do Google Lens"""
@@ -1975,7 +1942,6 @@ def test_db():
 def preview_ficha():
     """Rota para visualizar os dados do formulário antes de cadastrar"""
     try:
-        # Coleta dos dados do formulário
         form_data = {
             'nome': request.form.get('nome', ''),
             'cpf': request.form.get('cpf', ''),
@@ -2012,13 +1978,14 @@ def preview_ficha():
                     img = Image.open(imagem)
                     img_url = finder._convert_image_to_url(image=img)
                     form_data['imagem_url'] = img_url
-                    # Buscar produtos similares
+                    logger.info(f"Imagem convertida para URL: {img_url}")
                     if img_url:
-                        form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
-                        # Verificar e buscar preços faltantes
-                        for produto in form_data['produtos_similares']:
-                            if produto['preco'] == "Preço não disponível" and produto['url'] != "#":
-                                produto['preco'] = finder._fetch_price_from_url(produto['url'])
+                        produtos = finder.buscar_produtos_por_url(img_url)
+                        form_data['produtos_similares'] = produtos or []
+                        logger.info(f"Produtos encontrados: {len(produtos)}")
+                        # Log detalhado dos produtos
+                        for i, p in enumerate(produtos, 1):
+                            logger.info(f"Produto {i}: {p['nome']} | Preço: {p['preco']} | URL: {p['url']}")
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
