@@ -233,22 +233,18 @@ class ProdutoFinder:
             return ""
 
     def _safe_extract_url(self, element):
-        """Extrai URL do elemento de forma segura"""
+        """Extrai URL do elemento de forma segura, filtrando links internos do Google."""
         try:
-            # Tenta encontrar um link
-            try:
-                if element.tag_name == 'a':
-                    return element.get_attribute('href')
-            except:
-                pass
-            # Tenta encontrar um link dentro do elemento
-            try:
-                link = element.find_element(By.XPATH, ".//a")
-                return link.get_attribute('href')
-            except:
-                pass
+            link = element.find_element(By.XPATH,
+                                        ".//a[not(contains(@href, 'google.com') or contains(@href, 'lens.google'))]")
+            url = link.get_attribute('href')
+            if url and url != "#" and not url.startswith(('javascript:', 'about:')):
+                logger.info(f"URL válida extraída: {url}")
+                return url
+            logger.warning("URL inválida ou interna do Google encontrada")
             return "#"
         except:
+            logger.error("Erro ao extrair URL")
             return "#"
 
     def _safe_extract_price(self, element):
@@ -484,22 +480,38 @@ class ProdutoFinder:
     def _extract_products_selenium(self):
         """Método robusto para extração de produtos em 2025."""
         try:
-            print(f"\nURL atual: {self.driver.current_url}")
-            WebDriverWait(self.driver, 20).until(  # Aumentado para 20 segundos
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc], div.srKDX.cvP2Ce"))
+            logger.info(f"URL atual: {self.driver.current_url}")
+            # Aumentar tempo de espera para carregamento inicial
+            WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
             )
-            # Rolagem progressiva
-            for y in [300, 600, 900, 1200]:
+            logger.info("Página carregada, iniciando rolagem")
+
+            # Rolagem progressiva para carregar todos os elementos
+            for y in range(0, 2000, 500):
                 self.driver.execute_script(f"window.scrollTo(0, {y});")
-                time.sleep(2)
+                time.sleep(3)
+
+            # Tenta clicar na aba Shopping
+            try:
+                shopping_tab = WebDriverWait(self.driver, 15).until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                )
+                self.driver.execute_script("arguments[0].click();", shopping_tab)
+                time.sleep(5)
+                logger.info("Aba Shopping clicada com sucesso")
+            except Exception as e:
+                logger.warning(f"Não encontrou aba Shopping: {str(e)}")
 
             produtos = []
-            # Tenta extrair produtos com seletores atualizados
+            # Seletores atualizados para 2025
             selectors = [
-                "div.srKDX.cvP2Ce div.kb0PBd.cvP2Ce",  # Google Lens
                 "div.sh-dgr__grid-result",  # Google Shopping
-                "div.pla-unit",
-                "div[role='listitem']"
+                "div.srKDX.cvP2Ce div.kb0PBd.cvP2Ce",  # Google Lens
+                "div.pla-unit-container",  # PLA units
+                "div[role='listitem']",  # List items genéricos
+                "div.g, div.mnr-c"  # Resultados genéricos do Google
             ]
 
             for selector in selectors:
@@ -507,7 +519,7 @@ class ProdutoFinder:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements:
                         logger.info(f"Encontrados {len(elements)} elementos com seletor: {selector}")
-                        for element in elements[:5]:  # Limita a 5 resultados
+                        for element in elements[:5]:
                             try:
                                 produto = {
                                     "nome": self._safe_extract_text(element),
@@ -515,11 +527,10 @@ class ProdutoFinder:
                                     "url": self._safe_extract_url(element),
                                     "img": self._safe_extract_img(element)
                                 }
-                                # Se o preço não foi encontrado, tenta o fallback
-                                if produto["preco"] == "Preço não disponível" and produto["url"] != "#":
-                                    produto["preco"] = self._fetch_price_from_url(produto["url"])
-                                if produto["nome"] and produto["url"]:
+                                if produto["nome"] and produto["url"] != "#":
                                     produtos.append(produto)
+                                    logger.info(
+                                        f"Produto extraído: {produto['nome']} | Preço: {produto['preco']} | URL: {produto['url']}")
                             except Exception as e:
                                 logger.warning(f"Erro ao extrair produto: {str(e)}")
                                 continue
@@ -530,7 +541,7 @@ class ProdutoFinder:
                     continue
 
             if not produtos:
-                logger.info("Nenhum produto encontrado, tentando JavaScript...")
+                logger.info("Nenhum produto encontrado via seletores, tentando JavaScript...")
                 produtos = self._extract_with_javascript()
 
             logger.info(f"Total de produtos encontrados: {len(produtos)}")
@@ -919,19 +930,26 @@ class ProdutoFinder:
         return "#"
 
     def _initialize_driver(self):
+        """Inicializa o WebDriver com opções otimizadas para Docker."""
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--remote-debugging-port=9222")
-        chrome_options.add_argument("--window-size=1280,720")
-        # Desativa o Selenium Manager
+        chrome_options.add_argument("--headless")  # Modo headless para Docker
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
+        chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
+
+        # Adicionar argumentos para evitar detecção
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
         try:
-            self.driver = webdriver.Chrome(
-                service=Service(executable_path='/usr/bin/chromedriver'),
-                options=chrome_options
-            )
+            service = Service(executable_path='/usr/bin/chromedriver')
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Configurar implicit wait para aguardar elementos
+            self.driver.implicitly_wait(10)
+            logger.info("WebDriver inicializado com sucesso")
             return True
         except Exception as e:
             logger.error(f"Falha ao inicializar o WebDriver: {str(e)}")
@@ -1085,24 +1103,40 @@ class ProdutoFinder:
             encoded_url = urllib.parse.quote(image_url)
             search_url = f"https://lens.google.com/uploadbyurl?url={encoded_url}"
             logger.info(f"URL de busca no Google Lens: {search_url}")
-            self.driver.get(search_url)
-            time.sleep(10)  # Aumentado para garantir carregamento
+
+            # Tentar até 3 vezes para lidar com falhas de rede ou captcha
+            for attempt in range(self.max_retries):
+                try:
+                    self.driver.get(search_url)
+                    WebDriverWait(self.driver, 30).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+                    )
+                    logger.info("Página do Google Lens carregada")
+                    break
+                except Exception as e:
+                    logger.warning(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                    if attempt == self.max_retries - 1:
+                        logger.error("Falha após várias tentativas")
+                        return []
+                    time.sleep(5)
+
             # Tenta clicar na aba Shopping
             try:
                 shopping_tab = WebDriverWait(self.driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Shopping')]"))
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
                 )
-                shopping_tab.click()
+                self.driver.execute_script("arguments[0].click();", shopping_tab)
                 time.sleep(5)
                 logger.info("Aba Shopping clicada com sucesso")
             except Exception as e:
                 logger.warning(f"Não encontrou aba Shopping: {str(e)}")
-            # Extrair produtos
+
             produtos = self._extract_products_selenium()
             if not produtos:
                 logger.info("Nenhum produto encontrado via Selenium, tentando alternativa...")
                 produtos = self._extract_products_alternative()
-            # Log final
+
             logger.info(f"\n=== Resultados encontrados: {len(produtos)} ===")
             for i, p in enumerate(produtos, 1):
                 logger.info(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
@@ -1259,60 +1293,54 @@ class ProdutoFinder:
         return False
 
     def _extract_with_javascript(self):
-        """Fallback com JavaScript para extração mais robusta"""
+        """Fallback com extração via JavaScript."""
         try:
-            return self.driver.execute_script("""
+            produtos = self.driver.execute_script("""
                 const results = [];
-                const container = document.querySelector('div.srKDX.cvP2Ce');
-                if (container) {
-                    const products = container.querySelectorAll('div.kb0PBd.cvP2Ce');
-                    products.forEach((product, index) => {
-                        if (index >= 5) return; // Limita a 5 resultados
-                        try {
-                            const nameEl = product.querySelector("div[role='heading']");
-
-                            // CORREÇÃO: Busca melhorada por preços
-                            let price = 'Preço não disponível';
-                            const priceSelectors = [
-                                "span[aria-hidden='true']",
-                                '.e10twf',
-                                '.a8Pemb',
-                                '.T14wmb',
-                                '.O8U6h',
-                                '.NRRPPb',
-                                '.notranslate',
-                                'span:contains("R$")',
-                                'div:contains("R$")'
-                            ];
-
-                            for (const selector of priceSelectors) {
-                                const priceEl = product.querySelector(selector);
-                                if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
-                                    const priceText = priceEl.innerText.trim();
-                                    if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
-                                        price = priceText;
-                                        break;
-                                    }
+                const containers = document.querySelectorAll(
+                    'div.sh-dgr__grid-result, div.srKDX.cvP2Ce div.kb0PBd.cvP2Ce, div.pla-unit-container, div[role="listitem"], div.g, div.mnr-c'
+                );
+                containers.forEach(container => {
+                    try {
+                        const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"], div[role="heading"]');
+                        let price = 'Preço não disponível';
+                        const priceSelectors = [
+                            'span[class*="price"], span[class*="preco"], span[class*="valor"]',
+                            'span.a8Pemb, span[aria-hidden="true"]',
+                            'span:contains("R$"), div:contains("R$")',
+                            'meta[property="og:price:amount"]',
+                            '[itemprop="price"]'
+                        ];
+                        for (const selector of priceSelectors) {
+                            const priceEl = container.querySelector(selector);
+                            if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
+                                const priceText = priceEl.innerText.trim();
+                                if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
+                                    price = priceText;
+                                    break;
                                 }
                             }
-
-                            const linkEl = product.querySelector("a");
-                            const imgEl = product.querySelector("img");
+                        }
+                        const linkEl = container.querySelector('a:not([href*="google.com"], [href*="lens.google"])');
+                        const imgEl = container.querySelector('img');
+                        if (titleEl || linkEl) {
                             results.push({
-                                nome: nameEl?.innerText?.trim() || 'Produto similar',
+                                nome: titleEl?.innerText?.trim() || 'Produto similar',
                                 preco: price,
                                 url: linkEl?.href || '#',
                                 img: imgEl?.src || ''
                             });
-                        } catch (e) {
-                            console.error('Error extracting product:', e);
                         }
-                    });
-                }
-                return results;
+                    } catch (e) {
+                        console.error('Error extracting product:', e);
+                    }
+                });
+                return results.slice(0, 5);
             """) or []
+            logger.info(f"Extraídos {len(produtos)} produtos via JavaScript")
+            return produtos
         except Exception as e:
-            logger.error(f"Erro na extração com JavaScript: {str(e)}")
+            logger.error(f"Erro na extração via JavaScript: {str(e)}")
             return []
 
     def _extract_attribute_with_retry(self, element, attr, selectors, retries=3):
