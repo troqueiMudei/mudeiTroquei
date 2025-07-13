@@ -204,61 +204,63 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """CORREÇÃO: Extrai preço do elemento de forma mais robusta"""
+        """Extrai preço do elemento de forma robusta"""
         try:
-            # Lista expandida de seletores para preços
+            # Lista expandida de seletores para preços, incluindo o seletor específico para Google Shopping
             price_selectors = [
-                ".//span[contains(@class, 'price')]",
-                ".//span[contains(@class, 'e10twf')]",
-                ".//span[contains(@class, 'a8Pemb')]",
-                ".//span[contains(@class, 'T14wmb')]",
-                ".//span[contains(@class, 'O8U6h')]",
-                ".//span[contains(@class, 'NRRPPb')]",
-                ".//div[contains(@class, 'price')]",
+                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
+                ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//span[@aria-hidden='true']",
-                ".//span[contains(@class, 'notranslate')]",
-                ".//span[contains(text(), 'R$')]",
-                ".//div[contains(text(), 'R$')]",
-                ".//span[contains(text(), '$')]",
-                ".//div[contains(text(), '$')]"
+                ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
+                ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
+                ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
+                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"  # Adicionado para Google Shopping
             ]
 
+            # Tenta encontrar o preço com os seletores
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
-                    # Verifica se realmente contém um preço
                     if price_text and self._is_valid_price_text(price_text):
+                        logger.info(f"Preço encontrado: {price_text} (seletor: {selector})")
                         return price_text
-                except:
+                except Exception as e:
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
                     continue
 
-            # Se não encontrou com seletores, busca no texto completo
+            # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
-                price_match = re.search(r'R\$\s*[\d.,]+|\$\s*[\d.,]+|€\s*[\d.,]+|£\s*[\d.,]+', full_text)
-                if price_match:
-                    return price_match.group(0)
-            except:
-                pass
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
+                matches = re.findall(price_pattern, full_text, re.IGNORECASE)
+                for match in matches:
+                    if self._is_valid_price_text(match):
+                        logger.info(f"Preço encontrado no texto completo: {match}")
+                        return match
+            except Exception as e:
+                logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
+            # Fallback final: retorna mensagem padrão
+            logger.warning("Nenhum preço válido encontrado")
             return "Preço não disponível"
-        except:
+        except Exception as e:
+            logger.error(f"Erro geral na extração de preço: {str(e)}")
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """NOVA FUNÇÃO: Verifica se o texto é um preço válido"""
+        """Verifica se o texto é um preço válido"""
         if not text:
             return False
 
-        # Padrões de preço
+        # Padrões de preço expandidos
         price_patterns = [
-            r'R\$\s*[\d.,]+',
-            r'\$\s*[\d.,]+',
-            r'€\s*[\d.,]+',
-            r'£\s*[\d.,]+',
-            r'[\d.,]+\s*reais?',
-            r'[\d]+[.,][\d]+',  # Números com vírgula ou ponto
+            r'(?:R\$|\$|€|£|USD|BRL)\s*[\d,.]+(?:[,.]\d{2})?',  # R$ 1.234,56 ou $ 1234.56
+            r'[\d]+[.,][\d]+',  # 1234.56 ou 1234,56
+            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # 1234 reais
+            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234" ou "por $ 1234"
+            r'[\d,.]+(?:\s*off)?',  # Preços com "off" (desconto)
         ]
 
         for pattern in price_patterns:
@@ -927,29 +929,37 @@ class ProdutoFinder:
     def buscar_produtos_alternativo(self, image_url):
         """Método alternativo usando APIs de pesquisa por imagem"""
         try:
-            # 1. Upload da imagem para um serviço temporário
+            # Upload da imagem para um serviço temporário
             uploaded_url = self._upload_image_to_temp_service(image_url)
             if not uploaded_url:
+                logger.warning("Falha ao fazer upload da imagem para serviço temporário")
                 return []
-            # 2. Usar o SerpAPI para pesquisa por imagem
+            # Configurar parâmetros da SerpAPI
             params = {
                 "engine": "google_lens",
                 "url": uploaded_url,
-                "api_key": os.getenv("SERPAPI_KEY")
+                "api_key": os.getenv("SERPAPI_KEY", "sua_chave_aqui")  # Substitua pela sua chave
             }
-            response = requests.get("https://serpapi.com/search", params=params)
+            response = requests.get("https://serpapi.com/search", params=params, timeout=20)
+            if response.status_code != 200:
+                logger.error(f"Erro na SerpAPI: {response.status_code} - {response.text}")
+                return []
             results = response.json().get("visual_matches", [])
             produtos = []
             for item in results[:5]:  # Limitar a 5 resultados
+                price = item.get("price", {}).get("value", "Preço não disponível")
+                if isinstance(price, dict):
+                    price = price.get("value", "Preço não disponível")
                 produtos.append({
                     "nome": item.get("title", "Produto similar"),
-                    "preco": item.get("price", "Preço não disponível"),
+                    "preco": price,
                     "url": item.get("link", "#"),
                     "img": item.get("thumbnail", "")
                 })
+            logger.info(f"SerpAPI retornou {len(produtos)} produtos")
             return produtos
         except Exception as e:
-            logger.error(f"Erro na busca alternativa: {str(e)}")
+            logger.error(f"Erro na busca alternativa com SerpAPI: {str(e)}")
             return []
 
     def _generate_search_terms(self, image_url):
@@ -1236,57 +1246,53 @@ class ProdutoFinder:
         return False
 
     def _extract_with_javascript(self):
-        """Fallback com JavaScript para extração mais robusta"""
+        """Fallback com extração via JavaScript"""
         try:
             return self.driver.execute_script("""
                 const results = [];
-                const container = document.querySelector('div.srKDX.cvP2Ce');
-                if (container) {
-                    const products = container.querySelectorAll('div.kb0PBd.cvP2Ce');
-                    products.forEach((product, index) => {
-                        if (index >= 5) return; // Limita a 5 resultados
-                        try {
-                            const nameEl = product.querySelector("div[role='heading']");
+                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc, div.kb0PBd.cvP2Ce');
+                containers.forEach(container => {
+                    try {
+                        const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"], div[role="heading"]');
 
-                            // CORREÇÃO: Busca melhorada por preços
-                            let price = 'Preço não disponível';
-                            const priceSelectors = [
-                                "span[aria-hidden='true']",
-                                '.e10twf',
-                                '.a8Pemb',
-                                '.T14wmb',
-                                '.O8U6h',
-                                '.NRRPPb',
-                                '.notranslate',
-                                'span:contains("R$")',
-                                'div:contains("R$")'
-                            ];
+                        // Busca robusta por preços
+                        let price = 'Preço não disponível';
+                        const priceSelectors = [
+                            'span[class*="price"], span.a8Pemb, span.e10twf, span.T14wmb, span.O8U6h, span.NRRPPb, span.notranslate',
+                            'span[aria-hidden="true"]',
+                            'span:contains("R$"), div:contains("R$")',
+                            'span:contains("$"), div:contains("$")',
+                            'span:contains("€"), div:contains("€")',
+                            'span:contains("£"), div:contains("£")',
+                            '[class*="price-container"], [class*="price-block"]'
+                        ];
 
-                            for (const selector of priceSelectors) {
-                                const priceEl = product.querySelector(selector);
-                                if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
-                                    const priceText = priceEl.innerText.trim();
-                                    if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
-                                        price = priceText;
-                                        break;
-                                    }
+                        for (const selector of priceSelectors) {
+                            const priceEl = container.querySelector(selector);
+                            if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
+                                const priceText = priceEl.innerText.trim();
+                                if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
+                                    price = priceText;
+                                    break;
                                 }
                             }
+                        }
 
-                            const linkEl = product.querySelector("a");
-                            const imgEl = product.querySelector("img");
+                        const linkEl = container.querySelector('a');
+                        const imgEl = container.querySelector('img');
+                        if (titleEl || linkEl) {
                             results.push({
-                                nome: nameEl?.innerText?.trim() || 'Produto similar',
+                                nome: titleEl?.innerText?.trim() || 'Produto similar',
                                 preco: price,
                                 url: linkEl?.href || '#',
                                 img: imgEl?.src || ''
                             });
-                        } catch (e) {
-                            console.error('Error extracting product:', e);
                         }
-                    });
-                }
-                return results;
+                    } catch (e) {
+                        console.error('Error extracting product:', e);
+                    }
+                });
+                return results.slice(0, 5);
             """) or []
         except Exception as e:
             logger.error(f"Erro na extração com JavaScript: {str(e)}")
@@ -1530,30 +1536,28 @@ class ProdutoFinder:
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
-                # Aumente o tempo de espera inicial aqui (altere de 5 para 10)
                 print(f"\nTentativa {attempt + 1} - Acessando URL...")
                 self.driver.get(search_url)
-                time.sleep(10)  # Alterado de 5 para 10 segundos
-                # Adicione a rolagem da página aqui
-                print("Rolando página para carregar mais resultados...")
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/3);")
-                time.sleep(2)  # Espera após rolagem
+                time.sleep(10)  # Aumentado para 10 segundos
+                # Rolagem progressiva para carregar todos os elementos
+                for y in [500, 1000, 1500, 2000]:
+                    self.driver.execute_script(f"window.scrollTo(0, {y});")
+                    time.sleep(2)  # Espera após cada rolagem
                 # Verifique se há captcha
                 if self._check_for_captcha():
                     print("Captcha detectado! Tentando contornar...")
-                    time.sleep(15)  # Espera adicional para captcha
-                # Restante do código existente...
-                page_source = self.driver.page_source
-                # Tenta encontrar e clicar na aba Shopping
+                    time.sleep(20)  # Espera adicional para captcha
+                # Tenta encontrar e clicar na aba Shopping com o novo XPath
                 try:
-                    shopping_tab = WebDriverWait(self.driver, 15).until(
-                        EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Shopping')]"))
+                    shopping_tab = WebDriverWait(self.driver, 20).until(
+                        EC.element_to_be_clickable(
+                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
-                    time.sleep(8)  # Espera após clicar na aba
-                    # Adicione outra rolagem após mudar de aba
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/4);")
-                    time.sleep(2)
+                    time.sleep(10)  # Espera após clicar na aba
+                    # Rolagem adicional após mudar de aba
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                    time.sleep(3)
                 except Exception as e:
                     print(f"Não encontrou aba Shopping: {str(e)}")
                 # Debug - salvar screenshot
@@ -1568,7 +1572,7 @@ class ProdutoFinder:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
-        return products[:5]  # Limita a 5 resultados
+        return products[:5]
 
 
 finder = ProdutoFinder()

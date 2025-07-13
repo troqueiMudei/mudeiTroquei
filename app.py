@@ -1550,8 +1550,7 @@ class ProdutoFinder:
                 # Tenta encontrar e clicar na aba Shopping com o novo XPath
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)  # Espera após clicar na aba
@@ -1574,6 +1573,44 @@ class ProdutoFinder:
                     self._initialize_driver()
         return products[:5]
 
+    def _safe_extract_price_from_string(self, price_str):
+        """Converte uma string de preço para float, lidando com formatos"""
+        if not price_str or price_str == "Preço não disponível":
+            return 0.0
+        cleaned = re.sub(r'[^\d.,]', '', price_str)
+        cleaned = cleaned.replace(',', '.')
+        match = re.search(r'\d+\.\d+', cleaned)
+        return float(match.group()) if match else 0.0
+
+    def calcular_valores_estimados(self, ficha):
+        """Calcula os valores estimados com base nos itens similares"""
+        # Extrair preços dos itens similares
+        precos = []
+        for produto in ficha.get('produtos_similares', []):
+            preco = self._safe_extract_price_from_string(produto.get('preco', ''))
+            if preco:
+                precos.append(preco)
+
+        # Calcular a média dos preços
+        if precos:
+            media_precos = sum(precos) / len(precos)
+            valor_de_mercado = media_precos * 0.5  # 50% da média
+        else:
+            valor_de_mercado = 0.0  # Nenhum item similar encontrado
+
+        # Se não houver valor de mercado, use o valor original
+        if valor_de_mercado == 0.0:
+            valor_base = float(ficha.get('valor', 0))
+        else:
+            valor_base = valor_de_mercado
+
+        # Calcular os valores estimados
+        ficha['valorDeMercado'] = valor_base
+        ficha['valorEstimado'] = valor_base * 1.05
+        ficha['demandaMedia'] = ficha['valorEstimado'] * 1.05
+        ficha['demandaAlta'] = ficha['valorEstimado'] * 1.10
+
+        return ficha
 
 finder = ProdutoFinder()
 
@@ -1976,11 +2013,8 @@ def preview_ficha():
                 form_data['data_compra_br'] = form_data['data_compra']
         else:
             form_data['data_compra_br'] = "Não informada"
-        # Calcular valores estimados
-        valor_estimado = form_data['valor'] * 1.05
-        form_data['valorEstimado'] = valor_estimado
-        form_data['demandaMedia'] = valor_estimado * 1.05
-        form_data['demandaAlta'] = valor_estimado * 1.10
+        # Calcular valores estimados com base nos itens similares
+        form_data = finder.calcular_valores_estimados(form_data)
         return render_template('preview_ficha.html', ficha=form_data)
     except Exception as e:
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")
