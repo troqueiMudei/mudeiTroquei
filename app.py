@@ -2063,7 +2063,7 @@ def preview_ficha():
         else:
             form_data['data_compra_br'] = "Não informada"
         # Calcular valores estimados com base nos itens similares
-        form_data = ProdutoFinder.calcular_valores_estimados(form_data)
+        form_data = finder.calcular_valores_estimados(form_data)
         return render_template('preview_ficha.html', ficha=form_data)
     except Exception as e:
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")
