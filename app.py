@@ -29,8 +29,11 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Configuração de logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='app.log',
+    filemode='a'
+)
 logger = logging.getLogger(__name__)
 
 # Mapeamento de bairros
@@ -204,17 +207,22 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento de forma robusta"""
+        """Extrai preço do elemento de forma robusta, incluindo subtítulos e texto visível"""
         try:
             # Lista expandida de seletores para preços (atualizada para 2025)
             price_selectors = [
+                # Seletores para preços em Google Shopping/Lens
                 ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//span[@aria-hidden='true']",
                 ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
                 ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
                 ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
-                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]"
+                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
+                # Novos seletores para subtítulos e texto visível
+                ".//div[contains(@class, 'subtitle') or contains(@class, 'description') or contains(@class, 'details')]",
+                ".//span[contains(@class, 'subtitle') or contains(@class, 'price-text')]",
+                ".//p[contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]"
             ]
 
             # Tenta encontrar o preço com os seletores
@@ -238,6 +246,13 @@ class ProdutoFinder:
                     if self._is_valid_price_text(price_text):
                         logger.info(f"Preço encontrado no texto completo: {price_text}")
                         return price_text
+                # Tenta encontrar preços em subtítulos ou texto próximo
+                subtitle_match = re.search(r'(?:de|por|a partir de)\s*(?:R\$|\$|€|£)\s*[\d,.]+(?:[,.]\d{2})?', full_text, re.IGNORECASE)
+                if subtitle_match:
+                    price_text = subtitle_match.group(0)
+                    if self._is_valid_price_text(price_text):
+                        logger.info(f"Preço encontrado em subtítulo: {price_text}")
+                        return price_text
             except Exception as e:
                 logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
@@ -258,7 +273,7 @@ class ProdutoFinder:
             r'(?:R\$|\$|€|£|USD|BRL)\s*[\d,.]+(?:[,.]\d{2})?',  # R$ 1.234,56 ou $ 1234.56
             r'[\d]+[.,][\d]+',  # 1234.56 ou 1234,56
             r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # 1234 reais
-            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234" ou "por $ 1234"
+            r'(?:de|por|a partir de)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234" ou "por $ 1234"
             r'[\d,.]+(?:\s*off)?',  # Preços com "off" (desconto)
         ]
 
@@ -1072,7 +1087,7 @@ class ProdutoFinder:
             return []
 
     def buscar_produtos_por_url(self, image_url):
-        """CORREÇÃO: Busca produtos no Google Lens focando na extração direta dos elementos"""
+        """Busca produtos no Google Lens focando na extração direta dos elementos"""
         print(f"\n=== Iniciando busca para imagem: {image_url} ===")
         if not self._initialize_driver():
             print("Falha ao inicializar o driver")
@@ -1086,12 +1101,23 @@ class ProdutoFinder:
             # Capturar a URL atual após redirecionamento
             current_url = self.driver.current_url
             print(f"\nURL atual após redirecionamento: {current_url}")
+            # Tenta encontrar e clicar na aba Shopping
+            try:
+                shopping_tab = WebDriverWait(self.driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                )
+                shopping_tab.click()
+                time.sleep(10)  # Espera após clicar na aba
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(3)
+            except Exception as e:
+                print(f"Não encontrou aba Shopping: {str(e)}")
             # Extrair produtos diretamente da página do Google Lens
             produtos = self._extract_from_lens_page()
             # Debug final
             print(f"\n=== Resultados encontrados ===")
             for i, p in enumerate(produtos, 1):
-                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')} | {p.get('img', '')}")
             return produtos
         except Exception as e:
             print(f"\nErro durante a busca: {str(e)}")
@@ -1245,7 +1271,7 @@ class ProdutoFinder:
         return False
 
     def _extract_with_javascript(self):
-        """Fallback com extração via JavaScript"""
+        """Fallback com extração via JavaScript, incluindo subtítulos"""
         try:
             return self.driver.execute_script("""
                 const results = [];
@@ -1254,7 +1280,7 @@ class ProdutoFinder:
                     try {
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"], div[role="heading"]');
 
-                        // Busca robusta por preços
+                        // Busca robusta por preços, incluindo subtítulos
                         let price = 'Preço não disponível';
                         const priceSelectors = [
                             'span[class*="price"], span.a8Pemb, span.e10twf, span.T14wmb, span.O8U6h, span.NRRPPb, span.notranslate',
@@ -1263,7 +1289,9 @@ class ProdutoFinder:
                             'span:contains("$"), div:contains("$")',
                             'span:contains("€"), div:contains("€")',
                             'span:contains("£"), div:contains("£")',
-                            '[class*="price-container"], [class*="price-block"]'
+                            '[class*="price-container"], [class*="price-block"]',
+                            '[class*="subtitle"], [class*="price-text"], [class*="description"]',
+                            'p:contains("R$"), p:contains("$"), p:contains("€"), p:contains("£")'
                         ];
 
                         for (const selector of priceSelectors) {
@@ -1274,6 +1302,15 @@ class ProdutoFinder:
                                     price = priceText;
                                     break;
                                 }
+                            }
+                        }
+
+                        // Fallback: busca no texto completo do container
+                        if (price === 'Preço não disponível') {
+                            const fullText = container.innerText || '';
+                            const priceMatch = fullText.match(/(?:R\\$|\\$|€|£|USD|BRL)\\s*[\\d,.]+(?:[,.]\\d{2})?|(?:de|por|a partir de)\\s*(?:R\\$|\\$|€|£)\\s*[\\d,.]+/i);
+                            if (priceMatch) {
+                                price = priceMatch[0];
                             }
                         }
 
@@ -1296,6 +1333,51 @@ class ProdutoFinder:
         except Exception as e:
             logger.error(f"Erro na extração com JavaScript: {str(e)}")
             return []
+
+    def _save_products_to_db(self, entry_id, produtos):
+        """Salva os produtos encontrados no banco de dados"""
+        try:
+            conn = get_db_connection()
+            if not conn:
+                logger.error("Erro ao conectar ao banco de dados para salvar produtos")
+                return False
+
+            cursor = conn.cursor()
+            # Cria uma tabela para armazenar produtos similares, se não existir
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS frmt_form_similar_products (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    entry_id INT NOT NULL,
+                    nome VARCHAR(255),
+                    preco VARCHAR(100),
+                    url TEXT,
+                    img TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Insere cada produto no banco de dados
+            for produto in produtos:
+                cursor.execute("""
+                    INSERT INTO frmt_form_similar_products (entry_id, nome, preco, url, img)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    entry_id,
+                    produto.get('nome', 'Produto similar')[:255],
+                    produto.get('preco', 'Preço não disponível')[:100],
+                    produto.get('url', '#'),
+                    produto.get('img', '')
+                ))
+
+            conn.commit()
+            logger.info(f"Produtos salvos para entry_id {entry_id}: {len(produtos)} itens")
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao salvar produtos no banco de dados: {str(e)}")
+            return False
+
 
     def _extract_attribute_with_retry(self, element, attr, selectors, retries=3):
         """Tenta extrair atributo com múltiplas tentativas"""
