@@ -1574,13 +1574,62 @@ class ProdutoFinder:
         return products[:5]
 
     def _safe_extract_price_from_string(self, price_str):
-        """Converte uma string de preço para float, lidando com formatos"""
-        if not price_str or price_str == "Preço não disponível":
+        """
+        Extrai e converte um preço de uma string para um float,
+        lidando com símbolos de moeda e diferentes formatos de separadores.
+        """
+        if not price_str or price_str.strip() == "":
             return 0.0
-        cleaned = re.sub(r'[^\d.,]', '', price_str)
-        cleaned = cleaned.replace(',', '.')
-        match = re.search(r'\d+\.\d+', cleaned)
-        return float(match.group()) if match else 0.0
+
+        # Lista de símbolos de moeda comuns
+        currency_symbols = ['$', '€', '£', '¥', 'R$', '₹', '฿', '₽', '₩', '₪', '₫', '₭', '₮', '₯', '₰', '₱', '₲', '₳',
+                            '₴', '₵', '₶', '₷', '₸']
+
+        # Remover símbolos de moeda
+        for symbol in currency_symbols:
+            price_str = price_str.replace(symbol, '')
+
+        # Tratar sinal negativo
+        if price_str.startswith('-'):
+            is_negative = True
+            price_str = price_str[1:].lstrip()
+        else:
+            is_negative = False
+            price_str = price_str.lstrip()
+
+        # Remover todos os caracteres que não são dígitos, '.', ou ','
+        price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
+
+        # Encontrar a última ocorrência de '.' ou ','
+        dot_pos = price_str.rfind('.')
+        comma_pos = price_str.rfind(',')
+
+        if dot_pos == -1 and comma_pos == -1:
+            # Não há separador decimal
+            number_str = price_str
+        elif dot_pos == -1:
+            # Apenas vírgula presente, então ',' é o separador decimal
+            number_str = price_str.replace('.', '')  # Remove '.', mas não há
+            number_str = number_str.replace(',', '.')  # Substitui ',' por '.'
+        elif comma_pos == -1:
+            # Apenas ponto presente, então '.' é o separador decimal
+            number_str = price_str.replace(',', '')  # Remove ','
+        else:
+            # Ambos presentes, pega o que aparece por último
+            if dot_pos > comma_pos:
+                number_str = price_str.replace(',', '')  # Remove todos os ','
+            else:
+                number_str = price_str.replace('.', '')  # Remove todos os '.'
+                number_str = number_str.replace(',', '.')  # Substitui ',' por '.'
+
+        # Converter para float
+        try:
+            number = float(number_str)
+            if is_negative:
+                number = -number
+            return number
+        except ValueError:
+            return 0.0  # Retorna 0.0 se não for possível converter
 
     def calcular_valores_estimados(self, ficha):
         """Calcula os valores estimados com base nos itens similares"""
