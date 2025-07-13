@@ -233,7 +233,7 @@ class ProdutoFinder:
             # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
-                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+'
                 matches = re.findall(price_pattern, full_text, re.IGNORECASE)
                 for match in matches:
                     if self._is_valid_price_text(match):
@@ -256,11 +256,11 @@ class ProdutoFinder:
 
         # Padrões de preço expandidos
         price_patterns = [
-            r'(?:R\$|\$|€|£|USD|BRL)\s*[\d,.]+(?:[,.]\d{2})?',  # R$ 1.234,56 ou $ 1234.56
-            r'[\d]+[.,][\d]+',  # 1234.56 ou 1234,56
-            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # 1234 reais
-            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234" ou "por $ 1234"
-            r'[\d,.]+(?:\s*off)?',  # Preços com "off" (desconto)
+            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',  # Com ou sem símbolo de moeda
+            r'[\d]+[.,][\d]+',  # Número com separador decimal
+            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # Com palavras como "reais"
+            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234"
+            r'[\d,.]+(?:\s*off)?',  # Preços com "off"
         ]
 
         for pattern in price_patterns:
@@ -1637,7 +1637,7 @@ class ProdutoFinder:
         precos = []
         for produto in ficha.get('produtos_similares', []):
             preco = self._safe_extract_price_from_string(produto.get('preco', ''))
-            if preco:
+            if preco > 0:
                 precos.append(preco)
 
         # Calcular a média dos preços
@@ -1658,6 +1658,24 @@ class ProdutoFinder:
         ficha['valorEstimado'] = valor_base * 1.05
         ficha['demandaMedia'] = ficha['valorEstimado'] * 1.05
         ficha['demandaAlta'] = ficha['valorEstimado'] * 1.10
+
+        # Calcular despesas
+        imposto = {
+            'valorEstimado': ficha['valorEstimado'] * 0.06,
+            'demandaMedia': ficha['demandaMedia'] * 0.06,
+            'demandaAlta': ficha['demandaAlta'] * 0.06
+        }
+        comissao = ficha['valorEstimado'] * 0.15  # 15% do Valor Estimado
+        cartao_credito = ficha['valorEstimado'] * 0.05  # 5% do Valor Estimado
+        total_despesas = imposto['valorEstimado'] + comissao + cartao_credito
+        total_final = ficha['valorEstimado'] - total_despesas
+
+        # Adicionar os novos campos
+        ficha['imposto'] = imposto
+        ficha['comissao'] = comissao
+        ficha['cartaoCredito'] = cartao_credito
+        ficha['totalDespesas'] = total_despesas
+        ficha['totalFinal'] = total_final
 
         return ficha
 
