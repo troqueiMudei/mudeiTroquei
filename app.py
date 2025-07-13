@@ -206,7 +206,7 @@ class ProdutoFinder:
     def _safe_extract_price(self, element):
         """Extrai preço do elemento de forma robusta"""
         try:
-            # Lista expandida de seletores para preços (atualizada para 2025)
+            # Lista expandida de seletores para preços, incluindo o seletor específico para Google Shopping
             price_selectors = [
                 ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
@@ -214,7 +214,8 @@ class ProdutoFinder:
                 ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
                 ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
                 ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
-                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]"
+                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"  # Adicionado para Google Shopping
             ]
 
             # Tenta encontrar o preço com os seletores
@@ -232,12 +233,12 @@ class ProdutoFinder:
             # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
-                price_match = re.search(r'(?:R\$|\$|€|£|USD|BRL)\s*[\d,.]+(?:[,.]\d{2})?', full_text, re.IGNORECASE)
-                if price_match:
-                    price_text = price_match.group(0)
-                    if self._is_valid_price_text(price_text):
-                        logger.info(f"Preço encontrado no texto completo: {price_text}")
-                        return price_text
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
+                matches = re.findall(price_pattern, full_text, re.IGNORECASE)
+                for match in matches:
+                    if self._is_valid_price_text(match):
+                        logger.info(f"Preço encontrado no texto completo: {match}")
+                        return match
             except Exception as e:
                 logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
@@ -1546,11 +1547,11 @@ class ProdutoFinder:
                 if self._check_for_captcha():
                     print("Captcha detectado! Tentando contornar...")
                     time.sleep(20)  # Espera adicional para captcha
-                # Tenta encontrar e clicar na aba Shopping
+                # Tenta encontrar e clicar na aba Shopping com o novo XPath
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
                         EC.element_to_be_clickable(
-                            (By.XPATH, "//div[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)  # Espera após clicar na aba
