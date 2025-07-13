@@ -175,51 +175,44 @@
         <div class="p-6">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Valores Estimados</h2>
             <div class="bg-gray-50 rounded-lg p-4">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Valor Original</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.valor) }}</td>
+                <table class="min-w-full border-collapse">
+                    <thead>
+                        <tr class="bg-gray-200 text-gray-900">
+                            <th class="border border-gray-300 p-2 text-left font-semibold">Tipo de Valor</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Valor Base</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Imposto (6%)</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Comissão (15%)</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Cartão de Crédito (5%)</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Total Despesas</th>
+                            <th class="border border-gray-300 p-2 text-right font-semibold">Total Final</th>
                         </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Valor de Mercado</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.valorDeMercado) if ficha.valorDeMercado > 0 else 'N/A' }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Valor Estimado (+5%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.valorEstimado) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Demanda Média (+5%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.demandaMedia) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Demanda Alta (+10%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.demandaAlta) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Imposto (6%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
-                                Valor Estimado: R$ {{ "%.2f"|format(ficha.imposto.valorEstimado) }}<br>
-                                Demanda Média: R$ {{ "%.2f"|format(ficha.imposto.demandaMedia) }}<br>
-                                Demanda Alta: R$ {{ "%.2f"|format(ficha.imposto.demandaAlta) }}
+                    </thead>
+                    <tbody>
+                        {% for tipo, valores in ficha.valoresEstimados.items() %}
+                        <tr class="{% if loop.index % 2 == 0 %}bg-gray-100{% else %}bg-white{% endif %}">
+                            <td class="border border-gray-300 p-2">
+                                {% if tipo == 'valorDeMercado' %}Valor de Mercado
+                                {% elif tipo == 'valorEstimado' %}Valor Estimado
+                                {% elif tipo == 'demandaMedia' %}Demanda Média (+5%)
+                                {% elif tipo == 'demandaAlta' %}Demanda Alta (+10%)
+                                {% endif %}
                             </td>
+                            <td class="border border-gray-300 p-2 text-right">R$ {{ "%.2f"|format(valores.base) }}</td>
+                            <td class="border border-gray-300 p-2 text-right">R$ {{ "%.2f"|format(valores.imposto) }}</td>
+                            <td class="border border-gray-300 p-2 text-right">R$ {{ "%.2f"|format(valores.comissao) }}</td>
+                            <td class="border border-gray-300 p-2 text-right">R$ {{ "%.2f"|format(valores.cartaoCredito) }}</td>
+                            <td class="border border-gray-300 p-2 text-right">R$ {{ "%.2f"|format(valores.totalDespesas) }}</td>
+                            <td class="border border-gray-300 p-2 text-right font-semibold">R$ {{ "%.2f"|format(valores.totalFinal) }}</td>
                         </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Comissão (15%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.comissao) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Cartão de Crédito (5%)</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.cartaoCredito) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Total de Despesas</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.totalDespesas) }}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Total Final</td>
-                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">R$ {{ "%.2f"|format(ficha.totalFinal) }}</td>
+                        {% endfor %}
+                        <tr class="bg-gray-200">
+                            <td class="border border-gray-300 p-2 font-semibold">Valor Original</td>
+                            <td class="border border-gray-300 p-2 text-right font-semibold">R$ {{ "%.2f"|format(ficha.valorOriginal) }}</td>
+                            <td class="border border-gray-300 p-2 text-right">-</td>
+                            <td class="border border-gray-300 p-2 text-right">-</td>
+                            <td class="border border-gray-300 p-2 text-right">-</td>
+                            <td class="border border-gray-300 p-2 text-right">-</td>
+                            <td class="border border-gray-300 p-2 text-right">-</td>
                         </tr>
                     </tbody>
                 </table>

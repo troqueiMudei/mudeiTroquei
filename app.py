@@ -215,7 +215,7 @@ class ProdutoFinder:
                 ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
                 ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
                 ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
-                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"  # Adicionado para Google Shopping
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
 
             # Tenta encontrar o preço com os seletores
@@ -233,7 +233,7 @@ class ProdutoFinder:
             # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
-                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+'
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
                 matches = re.findall(price_pattern, full_text, re.IGNORECASE)
                 for match in matches:
                     if self._is_valid_price_text(match):
@@ -254,13 +254,12 @@ class ProdutoFinder:
         if not text:
             return False
 
-        # Padrões de preço expandidos
         price_patterns = [
-            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',  # Com ou sem símbolo de moeda
-            r'[\d]+[.,][\d]+',  # Número com separador decimal
-            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # Com palavras como "reais"
-            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234"
-            r'[\d,.]+(?:\s*off)?',  # Preços com "off"
+            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',
+            r'[\d]+[.,][\d]+',
+            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',
+            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',
+            r'[\d,.]+(?:\s*off)?',
         ]
 
         for pattern in price_patterns:
@@ -1538,31 +1537,25 @@ class ProdutoFinder:
                 self.driver.delete_all_cookies()
                 print(f"\nTentativa {attempt + 1} - Acessando URL...")
                 self.driver.get(search_url)
-                time.sleep(10)  # Aumentado para 10 segundos
-                # Rolagem progressiva para carregar todos os elementos
+                time.sleep(10)
                 for y in [500, 1000, 1500, 2000]:
                     self.driver.execute_script(f"window.scrollTo(0, {y});")
-                    time.sleep(2)  # Espera após cada rolagem
-                # Verifique se há captcha
+                    time.sleep(2)
                 if self._check_for_captcha():
                     print("Captcha detectado! Tentando contornar...")
-                    time.sleep(20)  # Espera adicional para captcha
-                # Tenta encontrar e clicar na aba Shopping com o novo XPath
+                    time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
                         EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
-                    time.sleep(10)  # Espera após clicar na aba
-                    # Rolagem adicional após mudar de aba
+                    time.sleep(10)
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
                     time.sleep(3)
                 except Exception as e:
                     print(f"Não encontrou aba Shopping: {str(e)}")
-                # Debug - salvar screenshot
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
-                # Extrai os produtos
                 products = self._extract_products_selenium()
                 if products:
                     print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
@@ -1578,18 +1571,15 @@ class ProdutoFinder:
         Extrai e converte um preço de uma string para um float,
         lidando com símbolos de moeda e diferentes formatos de separadores.
         """
-        if not price_str or price_str.strip() == "":
+        if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
 
-        # Lista de símbolos de moeda comuns
         currency_symbols = ['$', '€', '£', '¥', 'R$', '₹', '฿', '₽', '₩', '₪', '₫', '₭', '₮', '₯', '₰', '₱', '₲', '₳',
                             '₴', '₵', '₶', '₷', '₸']
 
-        # Remover símbolos de moeda
         for symbol in currency_symbols:
             price_str = price_str.replace(symbol, '')
 
-        # Tratar sinal negativo
         if price_str.startswith('-'):
             is_negative = True
             price_str = price_str[1:].lstrip()
@@ -1597,85 +1587,89 @@ class ProdutoFinder:
             is_negative = False
             price_str = price_str.lstrip()
 
-        # Remover todos os caracteres que não são dígitos, '.', ou ','
         price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
 
-        # Encontrar a última ocorrência de '.' ou ','
         dot_pos = price_str.rfind('.')
         comma_pos = price_str.rfind(',')
 
         if dot_pos == -1 and comma_pos == -1:
-            # Não há separador decimal
             number_str = price_str
         elif dot_pos == -1:
-            # Apenas vírgula presente, então ',' é o separador decimal
-            number_str = price_str.replace('.', '')  # Remove '.', mas não há
-            number_str = number_str.replace(',', '.')  # Substitui ',' por '.'
+            number_str = price_str.replace('.', '').replace(',', '.')
         elif comma_pos == -1:
-            # Apenas ponto presente, então '.' é o separador decimal
-            number_str = price_str.replace(',', '')  # Remove ','
+            number_str = price_str.replace(',', '')
         else:
-            # Ambos presentes, pega o que aparece por último
             if dot_pos > comma_pos:
-                number_str = price_str.replace(',', '')  # Remove todos os ','
+                number_str = price_str.replace(',', '')
             else:
-                number_str = price_str.replace('.', '')  # Remove todos os '.'
-                number_str = number_str.replace(',', '.')  # Substitui ',' por '.'
+                number_str = price_str.replace('.', '').replace(',', '.')
 
-        # Converter para float
         try:
             number = float(number_str)
             if is_negative:
                 number = -number
             return number
         except ValueError:
-            return 0.0  # Retorna 0.0 se não for possível converter
+            return 0.0
 
     def calcular_valores_estimados(self, ficha):
         """Calcula os valores estimados com base nos itens similares"""
-        # Extrair preços dos itens similares
         precos = []
         for produto in ficha.get('produtos_similares', []):
             preco = self._safe_extract_price_from_string(produto.get('preco', ''))
             if preco > 0:
                 precos.append(preco)
 
-        # Calcular a média dos preços
         if precos:
             media_precos = sum(precos) / len(precos)
-            valor_de_mercado = media_precos * 0.5  # 50% da média
+            valor_de_mercado = media_precos * 0.5
         else:
-            valor_de_mercado = 0.0  # Nenhum item similar encontrado
+            valor_de_mercado = 0.0
 
-        # Se não houver valor de mercado, use o valor original
         if valor_de_mercado == 0.0:
             valor_base = float(ficha.get('valor', 0))
         else:
             valor_base = valor_de_mercado
 
-        # Calcular os valores estimados
-        ficha['valorDeMercado'] = valor_base
-        ficha['valorEstimado'] = valor_base * 1.05
-        ficha['demandaMedia'] = ficha['valorEstimado'] * 1.05
-        ficha['demandaAlta'] = ficha['valorEstimado'] * 1.10
-
-        # Calcular despesas
-        imposto = {
-            'valorEstimado': ficha['valorEstimado'] * 0.06,
-            'demandaMedia': ficha['demandaMedia'] * 0.06,
-            'demandaAlta': ficha['demandaAlta'] * 0.06
+        valores = {
+            'valorDeMercado': {
+                'base': valor_base,
+                'imposto': valor_base * 0.06,
+                'comissao': valor_base * 0.15,
+                'cartaoCredito': valor_base * 0.05
+            },
+            'valorEstimado': {
+                'base': valor_base * 1.05,
+                'imposto': (valor_base * 1.05) * 0.06,
+                'comissao': (valor_base * 1.05) * 0.15,
+                'cartaoCredito': (valor_base * 1.05) * 0.05
+            },
+            'demandaMedia': {
+                'base': valor_base * 1.05 * 1.05,
+                'imposto': (valor_base * 1.05 * 1.05) * 0.06,
+                'comissao': (valor_base * 1.05 * 1.05) * 0.15,
+                'cartaoCredito': (valor_base * 1.05 * 1.05) * 0.05
+            },
+            'demandaAlta': {
+                'base': valor_base * 1.05 * 1.10,
+                'imposto': (valor_base * 1.05 * 1.10) * 0.06,
+                'comissao': (valor_base * 1.05 * 1.10) * 0.15,
+                'cartaoCredito': (valor_base * 1.05 * 1.10) * 0.05
+            }
         }
-        comissao = ficha['valorEstimado'] * 0.15  # 15% do Valor Estimado
-        cartao_credito = ficha['valorEstimado'] * 0.05  # 5% do Valor Estimado
-        total_despesas = imposto['valorEstimado'] + comissao + cartao_credito
-        total_final = ficha['valorEstimado'] - total_despesas
 
-        # Adicionar os novos campos
-        ficha['imposto'] = imposto
-        ficha['comissao'] = comissao
-        ficha['cartaoCredito'] = cartao_credito
-        ficha['totalDespesas'] = total_despesas
-        ficha['totalFinal'] = total_final
+        for tipo in valores:
+            valores[tipo]['totalDespesas'] = (
+                    valores[tipo]['imposto'] +
+                    valores[tipo]['comissao'] +
+                    valores[tipo]['cartaoCredito']
+            )
+            valores[tipo]['totalFinal'] = (
+                    valores[tipo]['base'] - valores[tipo]['totalDespesas']
+            )
+
+        ficha['valoresEstimados'] = valores
+        ficha['valorOriginal'] = float(ficha.get('valor', 0))
 
         return ficha
 
