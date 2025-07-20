@@ -440,88 +440,47 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """CORREÇÃO: Método robusto para extração de produtos em 2024"""
+        """Extrai produtos da página, filtrando apenas sites brasileiros"""
+        products = []
         try:
-            # Mostra a URL atual para debug
-            print(f"\nURL atual: {self.driver.current_url}")
-            # Espera pelo container principal
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc]"))
-            )
-            # Rolagem progressiva para carregar todos os elementos
-            for y in [300, 600, 900]:
-                self.driver.execute_script(f"window.scrollTo(0, {y});")
-                time.sleep(1.5)
-            # Extrai os produtos usando JavaScript CORRIGIDO
-            produtos = self.driver.execute_script("""
-                const results = [];
-                const containers = document.querySelectorAll('div[data-snc]');
-                containers.forEach(container => {
-                    const products = container.querySelectorAll('div[data-snf]');
-                    products.forEach(product => {
-                        try {
-                            const name = product.querySelector('[role="heading"]')?.innerText?.trim();
+            # Lista de domínios brasileiros aceitos (pode ser expandida)
+            brazilian_domains = [
+                '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
+                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
+            ]
 
-                            // CORREÇÃO: Múltiplos seletores para preço
-                            let price = 'Preço não disponível';
-                            const priceSelectors = [
-                                'span[aria-hidden="true"]',
-                                '.e10twf',
-                                '.a8Pemb', 
-                                '.T14wmb',
-                                '.O8U6h',
-                                '.NRRPPb',
-                                '.notranslate',
-                                'span:contains("R$")',
-                                'div:contains("R$")',
-                                'span:contains("$")'
-                            ];
+            # Seletor para produtos na aba Shopping
+            product_elements = self.driver.find_elements(By.XPATH,
+                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
+            for element in product_elements:
+                try:
+                    name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
+                    name = name_element.text.strip()
+                    price = self._safe_extract_price(element)
+                    url_element = element.find_element(By.XPATH, ".//a[@href]")
+                    url = url_element.get_attribute('href')
 
-                            for (const selector of priceSelectors) {
-                                const priceEl = product.querySelector(selector);
-                                if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
-                                    const priceText = priceEl.innerText.trim();
-                                    // Verifica se contém símbolos de moeda ou números
-                                    if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
-                                        price = priceText;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // Se ainda não encontrou, busca no texto completo
-                            if (price === 'Preço não disponível') {
-                                const fullText = product.innerText || '';
-                                const priceMatch = fullText.match(/R\\$\\s*[\\d.,]+|\\$\\s*[\\d.,]+|€\\s*[\\d.,]+|£\\s*[\\d.,]+/);
-                                if (priceMatch) {
-                                    price = priceMatch[0];
-                                }
-                            }
-
-                            const link = product.querySelector('a')?.href;
-                            const image = product.querySelector('img')?.src;
-                            if (name && link) {
-                                results.push({
-                                    nome: name,
-                                    preco: price,
-                                    url: link,
-                                    img: image || ''
-                                });
-                            }
-                        } catch(e) {
-                            console.error('Error extracting product:', e);
-                        }
-                    });
-                });
-                return results.slice(0, 5); // Limita a 5 resultados
-            """)
-            if not produtos:
-                print("Nenhum produto encontrado via JavaScript, tentando método alternativo...")
-                return self._extract_products_alternative()
-            return produtos
+                    # Filtrar apenas URLs de sites brasileiros
+                    is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
+                    if is_brazilian and name and price != "Preço não disponível":
+                        img = element.find_elements(By.XPATH, ".//img")
+                        img_url = img[0].get_attribute('src') if img else None
+                        products.append({
+                            'nome': name,
+                            'preco': price,
+                            'url': url,
+                            'img': img_url
+                        })
+                        logger.info(f"Produto brasileiro encontrado: {name} - {url}")
+                    else:
+                        logger.debug(f"URL ignorada (não brasileira): {url}")
+                except Exception as e:
+                    logger.debug(f"Erro ao extrair produto: {str(e)}")
+                    continue
         except Exception as e:
-            print(f"Erro na extração principal: {str(e)}")
-            return self._extract_products_alternative()
+            logger.error(f"Erro geral na extração de produtos: {str(e)}")
+
+        return products[:5]
 
     def _extract_products_alternative(self):
         """Método alternativo quando o principal falha"""
@@ -1547,7 +1506,8 @@ class ProdutoFinder:
                     time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable(
+                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)
@@ -1565,7 +1525,7 @@ class ProdutoFinder:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
-        return products[:5]
+        return products
 
     def _safe_extract_price_from_string(self, price_str):
         """
