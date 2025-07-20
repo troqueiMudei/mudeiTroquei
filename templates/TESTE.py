@@ -215,7 +215,7 @@ class ProdutoFinder:
                 ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
                 ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
                 ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
-                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"  # Adicionado para Google Shopping
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
 
             # Tenta encontrar o preço com os seletores
@@ -254,13 +254,12 @@ class ProdutoFinder:
         if not text:
             return False
 
-        # Padrões de preço expandidos
         price_patterns = [
-            r'(?:R\$|\$|€|£|USD|BRL)\s*[\d,.]+(?:[,.]\d{2})?',  # R$ 1.234,56 ou $ 1234.56
-            r'[\d]+[.,][\d]+',  # 1234.56 ou 1234,56
-            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',  # 1234 reais
-            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',  # "de R$ 1234" ou "por $ 1234"
-            r'[\d,.]+(?:\s*off)?',  # Preços com "off" (desconto)
+            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',
+            r'[\d]+[.,][\d]+',
+            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',
+            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',
+            r'[\d,.]+(?:\s*off)?',
         ]
 
         for pattern in price_patterns:
@@ -1538,32 +1537,25 @@ class ProdutoFinder:
                 self.driver.delete_all_cookies()
                 print(f"\nTentativa {attempt + 1} - Acessando URL...")
                 self.driver.get(search_url)
-                time.sleep(10)  # Aumentado para 10 segundos
-                # Rolagem progressiva para carregar todos os elementos
+                time.sleep(10)
                 for y in [500, 1000, 1500, 2000]:
                     self.driver.execute_script(f"window.scrollTo(0, {y});")
-                    time.sleep(2)  # Espera após cada rolagem
-                # Verifique se há captcha
+                    time.sleep(2)
                 if self._check_for_captcha():
                     print("Captcha detectado! Tentando contornar...")
-                    time.sleep(20)  # Espera adicional para captcha
-                # Tenta encontrar e clicar na aba Shopping com o novo XPath
+                    time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
-                    time.sleep(10)  # Espera após clicar na aba
-                    # Rolagem adicional após mudar de aba
+                    time.sleep(10)
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
                     time.sleep(3)
                 except Exception as e:
                     print(f"Não encontrou aba Shopping: {str(e)}")
-                # Debug - salvar screenshot
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
-                # Extrai os produtos
                 products = self._extract_products_selenium()
                 if products:
                     print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
@@ -1574,6 +1566,112 @@ class ProdutoFinder:
                     self._initialize_driver()
         return products[:5]
 
+    def _safe_extract_price_from_string(self, price_str):
+        """
+        Extrai e converte um preço de uma string para um float,
+        lidando com símbolos de moeda e diferentes formatos de separadores.
+        """
+        if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
+            return 0.0
+
+        currency_symbols = ['$', '€', '£', '¥', 'R$', '₹', '฿', '₽', '₩', '₪', '₫', '₭', '₮', '₯', '₰', '₱', '₲', '₳',
+                            '₴', '₵', '₶', '₷', '₸']
+
+        for symbol in currency_symbols:
+            price_str = price_str.replace(symbol, '')
+
+        if price_str.startswith('-'):
+            is_negative = True
+            price_str = price_str[1:].lstrip()
+        else:
+            is_negative = False
+            price_str = price_str.lstrip()
+
+        price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
+
+        dot_pos = price_str.rfind('.')
+        comma_pos = price_str.rfind(',')
+
+        if dot_pos == -1 and comma_pos == -1:
+            number_str = price_str
+        elif dot_pos == -1:
+            number_str = price_str.replace('.', '').replace(',', '.')
+        elif comma_pos == -1:
+            number_str = price_str.replace(',', '')
+        else:
+            if dot_pos > comma_pos:
+                number_str = price_str.replace(',', '')
+            else:
+                number_str = price_str.replace('.', '').replace(',', '.')
+
+        try:
+            number = float(number_str)
+            if is_negative:
+                number = -number
+            return number
+        except ValueError:
+            return 0.0
+
+    def calcular_valores_estimados(self, ficha):
+        """Calcula os valores estimados com base nos itens similares"""
+        precos = []
+        for produto in ficha.get('produtos_similares', []):
+            preco = self._safe_extract_price_from_string(produto.get('preco', ''))
+            if preco > 0:
+                precos.append(preco)
+
+        if precos:
+            media_precos = sum(precos) / len(precos)
+            valor_de_mercado = media_precos * 0.5
+        else:
+            valor_de_mercado = 0.0
+
+        if valor_de_mercado == 0.0:
+            valor_base = float(ficha.get('valor', 0))
+        else:
+            valor_base = valor_de_mercado
+
+        valores = {
+            'valorDeMercado': {
+                'base': valor_base,
+                'imposto': valor_base * 0.06,
+                'comissao': valor_base * 0.15,
+                'cartaoCredito': valor_base * 0.05
+            },
+            'valorEstimado': {
+                'base': valor_base * 1.05,
+                'imposto': (valor_base * 1.05) * 0.06,
+                'comissao': (valor_base * 1.05) * 0.15,
+                'cartaoCredito': (valor_base * 1.05) * 0.05
+            },
+            'demandaMedia': {
+                'base': valor_base * 1.05 * 1.05,
+                'imposto': (valor_base * 1.05 * 1.05) * 0.06,
+                'comissao': (valor_base * 1.05 * 1.05) * 0.15,
+                'cartaoCredito': (valor_base * 1.05 * 1.05) * 0.05
+            },
+            'demandaAlta': {
+                'base': valor_base * 1.05 * 1.10,
+                'imposto': (valor_base * 1.05 * 1.10) * 0.06,
+                'comissao': (valor_base * 1.05 * 1.10) * 0.15,
+                'cartaoCredito': (valor_base * 1.05 * 1.10) * 0.05
+            }
+        }
+
+        for tipo in valores:
+            valores[tipo]['totalDespesas'] = (
+                    valores[tipo]['imposto'] +
+                    valores[tipo]['comissao'] +
+                    valores[tipo]['cartaoCredito']
+            )
+            valores[tipo]['totalFinal'] = (
+                    valores[tipo]['base'] - valores[tipo]['totalDespesas']
+            )
+
+        ficha['valoresEstimados'] = valores
+        ficha['valorOriginal'] = float(ficha.get('valor', 0))
+
+        return ficha
 
 finder = ProdutoFinder()
 
@@ -1976,11 +2074,8 @@ def preview_ficha():
                 form_data['data_compra_br'] = form_data['data_compra']
         else:
             form_data['data_compra_br'] = "Não informada"
-        # Calcular valores estimados
-        valor_estimado = form_data['valor'] * 1.05
-        form_data['valorEstimado'] = valor_estimado
-        form_data['demandaMedia'] = valor_estimado * 1.05
-        form_data['demandaAlta'] = valor_estimado * 1.10
+        # Calcular valores estimados com base nos itens similares
+        form_data = finder.calcular_valores_estimados(form_data)
         return render_template('preview_ficha.html', ficha=form_data)
     except Exception as e:
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")

@@ -206,7 +206,6 @@ class ProdutoFinder:
     def _safe_extract_price(self, element):
         """Extrai preço do elemento de forma robusta"""
         try:
-            # Lista expandida de seletores para preços, incluindo o seletor específico para Google Shopping
             price_selectors = [
                 ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
@@ -218,7 +217,6 @@ class ProdutoFinder:
                 ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
 
-            # Tenta encontrar o preço com os seletores
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
@@ -230,7 +228,6 @@ class ProdutoFinder:
                     logger.debug(f"Seletor {selector} falhou: {str(e)}")
                     continue
 
-            # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
                 price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
@@ -242,7 +239,6 @@ class ProdutoFinder:
             except Exception as e:
                 logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
-            # Fallback final: retorna mensagem padrão
             logger.warning("Nenhum preço válido encontrado")
             return "Preço não disponível"
         except Exception as e:
@@ -1530,12 +1526,17 @@ class ProdutoFinder:
         return produto
 
     def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens"""
+        """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
         products = []
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
-                print(f"\nTentativa {attempt + 1} - Acessando URL...")
+                # Adicionar parâmetros regionais à URL
+                if '?' in search_url:
+                    search_url += '&gl=br&hl=pt-BR'
+                else:
+                    search_url += '?gl=br&hl=pt-BR'
+                print(f"\nTentativa {attempt + 1} - Acessando URL: {search_url}")
                 self.driver.get(search_url)
                 time.sleep(10)
                 for y in [500, 1000, 1500, 2000]:
