@@ -440,40 +440,38 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """Extrai produtos da página, filtrando apenas sites brasileiros"""
+        """Extrai produtos da página, filtrando apenas sites brasileiros e convertendo preços"""
         products = []
         try:
-            # Lista de domínios brasileiros aceitos (pode ser expandida)
             brazilian_domains = [
                 '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
                 'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
             ]
 
-            # Seletor para produtos na aba Shopping
             product_elements = self.driver.find_elements(By.XPATH,
                                                          "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
             for element in product_elements:
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
                     name = name_element.text.strip()
-                    price = self._safe_extract_price(element)
+                    price_text = self._safe_extract_price(element)
                     url_element = element.find_element(By.XPATH, ".//a[@href]")
                     url = url_element.get_attribute('href')
 
-                    # Filtrar apenas URLs de sites brasileiros
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and price != "Preço não disponível":
+                    if is_brazilian and name and price_text != "Preço não disponível":
+                        price_value = self._safe_extract_price_from_string(price_text)
                         img = element.find_elements(By.XPATH, ".//img")
                         img_url = img[0].get_attribute('src') if img else None
                         products.append({
                             'nome': name,
-                            'preco': price,
+                            'preco': f"R$ {price_value:.2f}",
                             'url': url,
                             'img': img_url
                         })
-                        logger.info(f"Produto brasileiro encontrado: {name} - {url}")
+                        logger.info(f"Produto brasileiro encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(f"URL ignorada (não brasileira): {url}")
+                        logger.debug(f"URL ou preço ignorado (não brasileiro ou inválido): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
@@ -1490,7 +1488,6 @@ class ProdutoFinder:
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
-                # Adicionar parâmetros regionais à URL
                 if '?' in search_url:
                     search_url += '&gl=br&hl=pt-BR'
                 else:
@@ -1529,24 +1526,19 @@ class ProdutoFinder:
 
     def _safe_extract_price_from_string(self, price_str):
         """
-        Extrai e converte um preço de uma string para um float,
-        lidando com símbolos de moeda e diferentes formatos de separadores.
+        Extrai e converte um preço de uma string para um float em reais,
+        convertendo dólares para reais com taxa fixa de 5.50.
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
 
-        currency_symbols = ['$', '€', '£', '¥', 'R$', '₹', '฿', '₽', '₩', '₪', '₫', '₭', '₮', '₯', '₰', '₱', '₲', '₳',
-                            '₴', '₵', '₶', '₷', '₸']
+        currency_symbols = {'$': 'USD', 'R$': 'BRL', '€': 'EUR', '£': 'GBP'}
+        is_negative = price_str.startswith('-')
+        price_str = price_str.replace('-', '').strip()
 
-        for symbol in currency_symbols:
-            price_str = price_str.replace(symbol, '')
-
-        if price_str.startswith('-'):
-            is_negative = True
-            price_str = price_str[1:].lstrip()
-        else:
-            is_negative = False
-            price_str = price_str.lstrip()
+        currency = next((sym for sym in currency_symbols if sym in price_str), 'BRL')
+        for sym in currency_symbols:
+            price_str = price_str.replace(sym, '').strip()
 
         price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
 
@@ -1569,6 +1561,16 @@ class ProdutoFinder:
             number = float(number_str)
             if is_negative:
                 number = -number
+
+            # Conversão para reais
+            exchange_rate = 5.50  # Taxa fixa USD para BRL (ajustável)
+            if currency == 'USD':
+                number = number * exchange_rate
+                logger.info(f"Convertido de USD {number / exchange_rate:.2f} para R$ {number:.2f}")
+            elif currency in ['EUR', 'GBP']:
+                logger.warning(f"Moeda {currency} não suportada, preço ignorado")
+                return 0.0
+
             return number
         except ValueError:
             return 0.0
