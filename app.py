@@ -440,7 +440,7 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """Extrai produtos da página, filtrando apenas sites brasileiros com preços em reais"""
+        """Extrai produtos da página, filtrando apenas sites brasileiros com preços em reais e ignorando sem preço"""
         products = []
         try:
             brazilian_domains = [
@@ -459,7 +459,8 @@ class ProdutoFinder:
                     url = url_element.get_attribute('href')
 
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and self._is_valid_price_text(price_text):
+                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                            price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
                         img = element.find_elements(By.XPATH, ".//img")
                         img_url = img[0].get_attribute('src') if img else None
@@ -469,9 +470,11 @@ class ProdutoFinder:
                             'url': url,
                             'img': img_url
                         })
-                        logger.info(f"Produto brasileiro encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                        logger.info(
+                            f"Produto brasileiro com preço encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(f"URL ou preço ignorado (não brasileiro ou não em R$): {url} - {price_text}")
+                        logger.debug(
+                            f"URL ou preço ignorado (não brasileiro, sem preço ou não em R$): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
