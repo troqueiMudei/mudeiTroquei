@@ -246,18 +246,18 @@ class ProdutoFinder:
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido em reais (R$)"""
+        """Verifica se o texto é um preço válido em reais (R$) ou dólar ($)"""
         if not text or not isinstance(text, str):
             return False
 
-        # Aceita apenas preços com R$ e rejeita outros símbolos de moeda
-        if 'R$' in text and not any(sym in text for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
+        # Aceita preços com R$ ou $ (para conversão)
+        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
             price_patterns = [
-                r'R\$?\s*[\d,.]+(?:[,.]\d{2})?',
-                r'[\d]+[.,][\d]+(?:\s*R\$)?',
-                r'[\d]+(?:\s*(?:reais|BRL))',
-                r'(?:de|por)\s*R\$?\s*[\d,.]+',
-                r'[\d,.]+(?:\s*reais)?',
+                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
+                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
+                r'[\d]+(?:\s*(?:reais|BRL|dólares|USD))',
+                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+',
+                r'[\d,.]+(?:\s*(?:reais|dólares))?',
             ]
             for pattern in price_patterns:
                 if re.search(pattern, text, re.IGNORECASE):
@@ -440,7 +440,7 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """Extrai produtos da página, filtrando apenas sites brasileiros com preços em reais e ignorando sem preço"""
+        """Extrai produtos da página, filtrando apenas sites brasileiros com preços em reais ou convertendo dólar"""
         products = []
         try:
             brazilian_domains = [
@@ -473,8 +473,7 @@ class ProdutoFinder:
                         logger.info(
                             f"Produto brasileiro com preço encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(
-                            f"URL ou preço ignorado (não brasileiro, sem preço ou não em R$): {url} - {price_text}")
+                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
@@ -1530,7 +1529,7 @@ class ProdutoFinder:
     def _safe_extract_price_from_string(self, price_str):
         """
         Extrai e converte um preço de uma string para um float em reais,
-        aceitando apenas preços com R$.
+        convertendo dólar ($) por 5.5 e aceitando apenas R$ ou $.
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
@@ -1538,8 +1537,9 @@ class ProdutoFinder:
         is_negative = price_str.startswith('-')
         price_str = price_str.replace('-', '').strip()
 
-        if 'R$' not in price_str or any(sym in price_str for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
-            logger.warning(f"Preço ignorado (não em R$): {price_str}")
+        currency = 'R$' if 'R$' in price_str else '$' if '$' in price_str else None
+        if not currency or any(sym in price_str for sym in ['€', '£', 'EUR', 'GBP']):
+            logger.warning(f"Preço ignorado (moeda não suportada): {price_str}")
             return 0.0
 
         for sym in ['R$', '$', '€', '£']:
@@ -1566,6 +1566,12 @@ class ProdutoFinder:
             number = float(number_str)
             if is_negative:
                 number = -number
+
+            # Conversão de dólar para real
+            if currency == '$':
+                number = number * 5.5
+                logger.info(f"Convertido de $ {number / 5.5:.2f} para R$ {number:.2f}")
+
             return number
         except ValueError:
             return 0.0
