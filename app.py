@@ -1485,7 +1485,7 @@ class ProdutoFinder:
         return produto
 
     def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
+        """Método interno para executar a busca no Google Lens, limitado ao Brasil, com nova tentativa se não houver preços"""
         products = []
         for attempt in range(self.max_retries):
             try:
@@ -1518,12 +1518,20 @@ class ProdutoFinder:
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
                 products = self._extract_products_selenium()
                 if products:
-                    print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
-                    break
+                    # Verifica se todos os produtos têm "Preço não disponível"
+                    all_no_price = all(prod['preco'] == "R$ 0.00" for prod in products)
+                    if not all_no_price:
+                        print(f"Encontrados {len(products)} produtos com preço na tentativa {attempt + 1}")
+                        break
+                    else:
+                        logger.warning("Nenhum preço válido encontrado, preparando nova tentativa")
+                else:
+                    logger.warning("Nenhum produto encontrado, preparando nova tentativa")
             except Exception as e:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
+                    continue
         return products
 
     def _safe_extract_price_from_string(self, price_str):
