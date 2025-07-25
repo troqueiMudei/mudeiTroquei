@@ -246,18 +246,18 @@ class ProdutoFinder:
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido exclusivamente em reais (R$)"""
+        """Verifica se o texto é um preço válido em reais (R$) ou dólar ($) para conversão"""
         if not text or not isinstance(text, str):
             return False
 
-        # Aceita apenas preços com R$ e rejeita outros símbolos de moeda
-        if 'R$' in text and not any(sym in text for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
+        # Aceita preços com R$ ou $ (para conversão a reais)
+        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
             price_patterns = [
-                r'R\$?\s*[\d,.]+(?:[,.]\d{2})?',
-                r'[\d]+[.,][\d]+(?:\s*R\$)?',
-                r'[\d]+(?:\s*(?:reais|BRL))',
-                r'(?:de|por)\s*R\$?\s*[\d,.]+',
-                r'[\d,.]+(?:\s*reais)?',
+                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
+                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
+                r'[\d]+(?:\s*(?:reais|BRL|dólares|USD))',
+                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+',
+                r'[\d,.]+(?:\s*(?:reais|dólares))?',
             ]
             for pattern in price_patterns:
                 if re.search(pattern, text, re.IGNORECASE):
@@ -440,7 +440,7 @@ class ProdutoFinder:
             return None
 
     def _extract_products_selenium(self):
-        """Extrai produtos da página, filtrando apenas sites brasileiros com preços exclusivamente em reais"""
+        """Extrai produtos da página, filtrando apenas sites brasileiros com preços em reais ou convertendo dólar"""
         products = []
         try:
             brazilian_domains = [
@@ -448,7 +448,8 @@ class ProdutoFinder:
                 'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
             ]
 
-            product_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
+            product_elements = self.driver.find_elements(By.XPATH,
+                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
             for element in product_elements:
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
@@ -458,7 +459,8 @@ class ProdutoFinder:
                     url = url_element.get_attribute('href')
 
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
+                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                            price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
                         img = element.find_elements(By.XPATH, ".//img")
                         img_url = img[0].get_attribute('src') if img else None
@@ -468,9 +470,10 @@ class ProdutoFinder:
                             'url': url,
                             'img': img_url
                         })
-                        logger.info(f"Produto brasileiro com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                        logger.info(
+                            f"Produto brasileiro com preço encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(f"URL ou preço ignorado (não em reais ou sem preço): {url} - {price_text}")
+                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
@@ -1515,13 +1518,13 @@ class ProdutoFinder:
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
                 products = self._extract_products_selenium()
                 if len(products) < 5:
-                    logger.warning(f"Encontrados {len(products)} produtos com preço em reais, buscando novamente")
+                    logger.warning(f"Encontrados {len(products)} produtos com preço, buscando novamente")
                     attempt += 1
                     if attempt < self.max_retries:
                         self._initialize_driver()
                         continue
                 else:
-                    print(f"Encontrados {len(products)} produtos com preço em reais na tentativa {attempt + 1}")
+                    print(f"Encontrados {len(products)} produtos com preço na tentativa {attempt + 1}")
                     break
             except Exception as e:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
@@ -1534,7 +1537,7 @@ class ProdutoFinder:
     def _safe_extract_price_from_string(self, price_str):
         """
         Extrai e converte um preço de uma string para um float em reais,
-        aceitando apenas preços com R$ (dólar é rejeitado após tentativa de conversão).
+        convertendo dólar ($) por 5.5 e aceitando apenas R$ ou $ (convertido).
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
@@ -1572,10 +1575,10 @@ class ProdutoFinder:
             if is_negative:
                 number = -number
 
-            # Rejeita dólar, apenas reais são aceitos
+            # Conversão de dólar para real
             if currency == '$':
-                logger.warning(f"Preço em dólar ($ {number:.2f}) ignorado após tentativa de conversão")
-                return 0.0
+                number = number * 5.5
+                logger.info(f"Convertido de $ {number / 5.5:.2f} para R$ {number:.2f}")
 
             return number
         except ValueError:
