@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block content %}
@@ -55,7 +54,7 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Valor Unitário</p>
-                    <p class="font-medium">R$ {{ "%.2f"|format(ficha.valor) }}</p>
+                    <p class="font-medium">R$ {{ "%.2f"|format(ficha.valorOriginal) }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Marcas de Uso</p>
@@ -93,7 +92,7 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Outro Bairro</p>
-                    <p class="font-medium">{{ ficha.outroBairro if ficha.outroBairro else 'Nenhum' }}</p>
+                    <p class="font-medium">{{ ficha.outroBairro if ficha.outroBairro else 'Nenhuma' }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Voltagem</p>
@@ -174,7 +173,7 @@
         <!-- Valores Estimados -->
         <div class="p-6">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Valores Estimados</h2>
-            <div class="bg-gray-50 rounded-lg p-4">
+            <div class="bg-gray-50 rounded-lg p-4 overflow-x-auto">
                 <table class="min-w-full border-collapse">
                     <thead>
                         <tr class="bg-gray-200 text-gray-900">
@@ -192,7 +191,7 @@
                         <tr class="{% if loop.index % 2 == 0 %}bg-gray-100{% else %}bg-white{% endif %}">
                             <td class="border border-gray-300 p-2">
                                 {% if tipo == 'valorDeMercado' %}Valor de Mercado
-                                {% elif tipo == 'valorEstimado' %}Valor Estimado
+                                {% elif tipo == 'valorEstimado' %}Valor Estimado (+5%)
                                 {% elif tipo == 'demandaMedia' %}Demanda Média (+5%)
                                 {% elif tipo == 'demandaAlta' %}Demanda Alta (+10%)
                                 {% endif %}
@@ -206,7 +205,7 @@
                         </tr>
                         {% endfor %}
                         <tr class="bg-gray-200">
-                            <td class="border border-gray-300 p-2 font-semibold">Valor Oferecido pelo cliente</td>
+                            <td class="border border-gray-300 p-2 font-semibold">Valor Original</td>
                             <td class="border border-gray-300 p-2 text-right font-semibold">R$ {{ "%.2f"|format(ficha.valorOriginal) }}</td>
                             <td class="border border-gray-300 p-2 text-right">-</td>
                             <td class="border border-gray-300 p-2 text-right">-</td>
@@ -235,7 +234,7 @@
             <input type="hidden" name="marca" value="{{ ficha.marca }}">
             <input type="hidden" name="quantidade" value="{{ ficha.quantidade }}">
             <input type="hidden" name="data_compra" value="{{ ficha.data_compra }}">
-            <input type="hidden" name="valor_unitario" value="{{ ficha.valor }}">
+            <input type="hidden" name="valor_unitario" value="{{ ficha.valorOriginal }}">
             <input type="hidden" name="marcas_uso" value="{{ ficha.marcaUso }}">
             <input type="hidden" name="descricao" value="{{ ficha.descricao }}">
             <input type="hidden" name="altura" value="{{ ficha.altura }}">
@@ -253,6 +252,7 @@
             <input type="hidden" name="estado[]" value="{{ estado }}">
             {% endfor %}
             <input type="hidden" name="imagem_url" value="{{ ficha.imagem_url }}">
+
             <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
                 Confirmar Cadastro
             </button>

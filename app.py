@@ -448,7 +448,8 @@ class ProdutoFinder:
                 'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
             ]
 
-            product_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
+            product_elements = self.driver.find_elements(By.XPATH,
+                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
             for element in product_elements:
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
@@ -458,7 +459,8 @@ class ProdutoFinder:
                     url = url_element.get_attribute('href')
 
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
+                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                            price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
                         if price_value > 0:  # Inclui apenas produtos com preço válido após conversão
                             img = element.find_elements(By.XPATH, ".//img")
@@ -469,7 +471,8 @@ class ProdutoFinder:
                                 'url': url,
                                 'img': img_url
                             })
-                            logger.info(f"Produto brasileiro com preço encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                            logger.info(
+                                f"Produto brasileiro com preço encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
                         logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
                 except Exception as e:
@@ -1483,7 +1486,7 @@ class ProdutoFinder:
         return produto
 
     def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos com preços"""
+        """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos com preços em reais"""
         products = []
         attempt = 0
         while len(products) < 5 and attempt < self.max_retries:
@@ -1504,7 +1507,8 @@ class ProdutoFinder:
                     time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable(
+                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)
@@ -1535,7 +1539,7 @@ class ProdutoFinder:
     def _safe_extract_price_from_string(self, price_str):
         """
         Extrai e converte um preço de uma string para um float em reais,
-        convertendo dólar ($) por 5.5 e aceitando apenas R$ ou $ (convertido).
+        convertendo dólar ($) por 5.5 e rejeitando se não for R$ ou $ (convertido).
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
