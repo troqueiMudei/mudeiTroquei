@@ -204,13 +204,13 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento, aceitando apenas preços em reais (R$)"""
+        """Extrai preço do elemento, aceitando exclusivamente preços em reais (R$)"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'price') and contains(text(), 'R$')]",
-                ".//div[contains(@class, 'price') and contains(text(), 'R$')]",
-                ".//span[contains(@class, 'formatted-price') and contains(text(), 'R$')]",
-                ".//div[contains(@class, 'sh-price') and contains(text(), 'R$')]"
+                ".//span[contains(text(), 'R$') and contains(@class, 'price')]",
+                ".//div[contains(text(), 'R$') and contains(@class, 'price')]",
+                ".//span[contains(text(), 'R$') and contains(@class, 'formatted-price')]",
+                ".//div[contains(text(), 'R$') and contains(@class, 'sh-price')]"
             ]
 
             for selector in price_selectors:
@@ -246,7 +246,7 @@ class ProdutoFinder:
         if not text or not isinstance(text, str):
             return False
 
-        # Aceita apenas preços com R$, rejeitando qualquer outra moeda ou formato inválido
+        # Rejeita qualquer texto que contenha $, €, £ ou outras moedas
         if 'R$' in text and not any(sym in text for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
             price_patterns = [
                 r'R\$?\s*[\d,.]+(?:[,.]\d{2})?',
@@ -255,7 +255,7 @@ class ProdutoFinder:
                 r'(?:de|por)\s*R\$?\s*[\d,.]+'
             ]
             for pattern in price_patterns:
-                if re.search(pattern, text, re.IGNORECASE) and not re.search(r'[\$€£]', text):
+                if re.fullmatch(pattern, text.strip(), re.IGNORECASE):
                     return True
         return False
 
@@ -443,8 +443,7 @@ class ProdutoFinder:
                 'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
             ]
 
-            product_elements = self.driver.find_elements(By.XPATH,
-                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
+            product_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
             for element in product_elements:
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
@@ -454,8 +453,7 @@ class ProdutoFinder:
                     url = url_element.get_attribute('href')
 
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
-                            price_text):
+                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
                         if price_value > 0:  # Inclui apenas produtos com preço válido em reais
                             img = element.find_elements(By.XPATH, ".//img")
@@ -466,11 +464,9 @@ class ProdutoFinder:
                                 'url': url,
                                 'img': img_url
                             })
-                            logger.info(
-                                f"Produto brasileiro com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                            logger.info(f"Produto brasileiro com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(
-                            f"URL ou preço ignorado (não brasileiro ou sem preço em reais): {url} - {price_text}")
+                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço em reais): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
@@ -1482,7 +1478,7 @@ class ProdutoFinder:
         return produto
 
     def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos com preços em reais"""
+        """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos com preços exclusivamente em reais"""
         products = []
         attempt = 0
         while len(products) < 5 and attempt < self.max_retries:
@@ -1503,8 +1499,7 @@ class ProdutoFinder:
                     time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)
@@ -1535,7 +1530,7 @@ class ProdutoFinder:
     def _safe_extract_price_from_string(self, price_str):
         """
         Extrai e converte um preço de uma string para um float em reais,
-        aceitando apenas preços com R$ (dólar e outras moedas são rejeitados).
+        aceitando apenas preços com R$ e rejeitando outras moedas.
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
@@ -1544,7 +1539,7 @@ class ProdutoFinder:
         price_str = price_str.replace('-', '').strip()
 
         if 'R$' not in price_str or any(sym in price_str for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
-            logger.warning(f"Preço ignorado (não em reais ou moeda inválida): {price_str}")
+            logger.warning(f"Preço ignorado (não em reais ou moeda inválida detectada): {price_str}")
             return 0.0
 
         price_str = price_str.replace('R$', '').strip()
