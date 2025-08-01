@@ -243,7 +243,7 @@ class ProdutoFinder:
 
     def _is_valid_price_text(self, text):
         """Verifica se o texto é um preço válido exclusivamente em reais (R$), rejeitando outras moedas"""
-        if not text or not isinstance(text, str):
+        if not text or not isinstance(text, str) or text == "Preço não disponível":
             return False
 
         # Rejeita qualquer texto que contenha $, €, £ ou outras moedas
@@ -469,7 +469,7 @@ class ProdutoFinder:
                         price_text = self._safe_extract_price(element)
                         if name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
                             price_value = self._safe_extract_price_from_string(price_text)
-                            if price_value > 0:
+                            if price_value > 0 and len(products) < 5:
                                 img = element.find_elements(By.XPATH, ".//img")
                                 img_url = img[0].get_attribute('src') if img else None
                                 products.append({
@@ -480,58 +480,15 @@ class ProdutoFinder:
                                 })
                                 logger.info(
                                     f"Produto brasileiro com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                        else:
+                            logger.debug(f"Item sem preço válido ou ignorado: {url} - {price_text}")
                     else:
-                        logger.debug(f"URL ou preço ignorado (excluído ou não brasileiro): {url}")
+                        logger.debug(f"URL excluída (domínio indesejado): {url}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
         except Exception as e:
             logger.error(f"Erro geral na extração de produtos: {str(e)}")
-
-        # Adicionar itens similares ou novos com base na query
-        if len(products) < 5:
-            logger.info(f"Procurando itens similares ou novos para complementar ({len(products)} encontrados)")
-            similar_elements = self.driver.find_elements(By.XPATH,
-                                                         "//div[contains(@class, 'related-searches') or contains(@class, 'similar-items')]//a[@href]")
-            for element in similar_elements:
-                try:
-                    similar_url = element.get_attribute('href')
-                    if similar_url and '.com.br' in similar_url.lower() and not any(
-                            excluded in similar_url.lower() for excluded in excluded_domains):
-                        self.driver.get(similar_url)
-                        time.sleep(5)
-                        new_elements = self.driver.find_elements(By.XPATH,
-                                                                 "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
-                        for new_element in new_elements[:5]:  # Limita a 5 novos itens
-                            try:
-                                name_element = new_element.find_element(By.XPATH,
-                                                                        ".//h3 | .//span[contains(@class, 'title')]")
-                                name = name_element.text.strip()
-                                price_text = self._safe_extract_price(new_element)
-                                if name and price_text != "Preço não disponível" and self._is_valid_price_text(
-                                        price_text):
-                                    price_value = self._safe_extract_price_from_string(price_text)
-                                    if price_value > 0 and len(products) < 5:
-                                        img = new_element.find_elements(By.XPATH, ".//img")
-                                        img_url = img[0].get_attribute('src') if img else None
-                                        products.append({
-                                            'nome': name,
-                                            'preco': f"R$ {price_value:.2f}",
-                                            'url': similar_url,
-                                            'img': img_url
-                                        })
-                                        logger.info(
-                                            f"Item similar/novo encontrado: {name} - {similar_url} - Preço: R$ {price_value:.2f}")
-                            except Exception as e:
-                                logger.debug(f"Erro ao extrair item similar: {str(e)}")
-                                continue
-                        self.driver.back()
-                        time.sleep(3)
-                        if len(products) >= 5:
-                            break
-                except Exception as e:
-                    logger.debug(f"Erro ao processar URL similar: {str(e)}")
-                    continue
 
         return products
 
@@ -1539,7 +1496,7 @@ class ProdutoFinder:
 
     def _executar_busca(self, search_url, search_query):
         """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos
-        com preços exclusivamente em reais de sites aceitáveis, incluindo similares/novos se necessário"""
+        com preços exclusivamente em reais de sites aceitáveis"""
         products = []
         attempt = 0
         while len(products) < 5 and attempt < self.max_retries:
@@ -1572,9 +1529,11 @@ class ProdutoFinder:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
                 products = self._extract_products_selenium(search_query)
-                if len(products) < 5:
+                if len(products) < 5 or any(
+                        "amazon" in p['url'].lower() or "facebook" in p['url'].lower() or "instagram" in p[
+                            'url'].lower() or "twitter" in p['url'].lower() for p in products):
                     logger.warning(
-                        f"Encontrados {len(products)} produtos com preço em reais de sites aceitáveis, buscando novamente")
+                        f"Encontrados {len(products)} produtos, reiniciando devido a domínios excluídos ou falta de preço")
                     attempt += 1
                     if attempt < self.max_retries:
                         self._initialize_driver()
