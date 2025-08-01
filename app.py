@@ -242,7 +242,7 @@ class ProdutoFinder:
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido exclusivamente em reais (R$), rejeitando outras moedas"""
+        """Verifica se o texto é um preço válido exclusivamente em reais (R$), rejeitando outras moedas e 'Preço não disponível'"""
         if not text or not isinstance(text, str) or text == "Preço não disponível":
             return False
 
@@ -436,7 +436,7 @@ class ProdutoFinder:
 
     def _extract_products_selenium(self, search_query):
         """Extrai produtos da página, limitando a sites brasileiros comerciais com preços em reais,
-        excluindo redes sociais e Amazon"""
+        excluindo redes sociais, Amazon e itens sem preço"""
         products = []
         try:
             # Domínios brasileiros aceitáveis (expandidos)
@@ -467,9 +467,10 @@ class ProdutoFinder:
                     is_excluded = any(excluded in url.lower() for excluded in excluded_domains)
                     if is_brazilian and not is_excluded:
                         price_text = self._safe_extract_price(element)
-                        if name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
+                        if name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                                price_text) and len(products) < 5:
                             price_value = self._safe_extract_price_from_string(price_text)
-                            if price_value > 0 and len(products) < 5:
+                            if price_value > 0:
                                 img = element.find_elements(By.XPATH, ".//img")
                                 img_url = img[0].get_attribute('src') if img else None
                                 products.append({
@@ -1496,7 +1497,7 @@ class ProdutoFinder:
 
     def _executar_busca(self, search_url, search_query):
         """Método interno para executar a busca no Google Lens, limitado ao Brasil, repetindo até encontrar 5 produtos
-        com preços exclusivamente em reais de sites aceitáveis"""
+        com preços exclusivamente em reais de sites aceitáveis, reiniciando se houver 'Preço não disponível'"""
         products = []
         attempt = 0
         while len(products) < 5 and attempt < self.max_retries:
@@ -1529,11 +1530,11 @@ class ProdutoFinder:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
                 products = self._extract_products_selenium(search_query)
-                if len(products) < 5 or any(
+                if len(products) < 5 or any(p['preco'] == "Preço não disponível" for p in products) or any(
                         "amazon" in p['url'].lower() or "facebook" in p['url'].lower() or "instagram" in p[
                             'url'].lower() or "twitter" in p['url'].lower() for p in products):
                     logger.warning(
-                        f"Encontrados {len(products)} produtos, reiniciando devido a domínios excluídos ou falta de preço")
+                        f"Encontrados {len(products)} produtos, reiniciando devido a 'Preço não disponível' ou domínios excluídos")
                     attempt += 1
                     if attempt < self.max_retries:
                         self._initialize_driver()
