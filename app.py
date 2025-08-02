@@ -1497,10 +1497,11 @@ class ProdutoFinder:
 
     def _executar_busca(self, search_url, search_query):
         """Método interno para executar a busca no Google Lens, limitado ao Brasil, looping até encontrar 5 produtos
-        com preços exclusivamente em reais de sites aceitáveis"""
+        com preços exclusivamente em reais de sites aceitáveis, excluindo Amazon e redes sociais"""
         products = []
         attempt = 0
-        while len(products) < 5 and attempt < self.max_retries:
+        max_attempts = 60  # Aumentado para garantir mais tentativas
+        while len(products) < 5:
             try:
                 self.driver.delete_all_cookies()
                 if '?' in search_url:
@@ -1530,61 +1531,33 @@ class ProdutoFinder:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
                 products = self._extract_products_selenium(search_query)
-                if len(products) < 5 or any(p['preco'] == "Preço não disponível" for p in products) or any(
-                        "amazon" in p['url'].lower() or "facebook" in p['url'].lower() or "instagram" in p[
-                            'url'].lower() or "twitter" in p['url'].lower() for p in products):
-                    logger.warning(
-                        f"Encontrados {len(products)} produtos, reiniciando devido a 'Preço não disponível' ou domínios excluídos")
+                # Verifica se há itens com preço inválido ou domínios excluídos
+                valid_products = [p for p in products if p['preco'] != "Preço não disponível" and not any(
+                    excluded in p['url'].lower() for excluded in [
+                        'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
+                        'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
+                        'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn'
+                    ])]
+                products = valid_products
+                if len(products) < 5:
+                    logger.warning(f"Encontrados {len(products)} produtos válidos, reiniciando busca")
                     attempt += 1
-                    if attempt < self.max_retries:
-                        self._initialize_driver()
-                        continue
-                else:
-                    print(f"Encontrados {len(products)} produtos com preço em reais na tentativa {attempt + 1}")
-                    break
-            except Exception as e:
-                print(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                attempt += 1
-                if attempt < self.max_retries:
+                    if attempt >= max_attempts:
+                        logger.error(
+                            f"Limite de {max_attempts} tentativas atingido. Retornando {len(products)} produtos.")
+                        break
                     self._initialize_driver()
                     continue
-        # Loop contínuo até 5 itens com preço, ignorando max_retries se necessário
-        while len(products) < 5 and attempt < 10:  # Limite adicional de 10 tentativas para evitar loops infinitos
-            try:
-                self._initialize_driver()
-                self.driver.get(search_url)
-                time.sleep(10)
-                for y in [500, 1000, 1500, 2000]:
-                    self.driver.execute_script(f"window.scrollTo(0, {y});")
-                    time.sleep(2)
-                if self._check_for_captcha():
-                    print("Captcha detectado! Tentando contornar...")
-                    time.sleep(20)
-                try:
-                    shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
-                    )
-                    shopping_tab.click()
-                    time.sleep(10)
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-                    time.sleep(3)
-                except Exception as e:
-                    print(f"Não encontrou aba Shopping: {str(e)}")
-                products = self._extract_products_selenium(search_query)
-                if len(products) < 5 or any(p['preco'] == "Preço não disponível" for p in products) or any(
-                        "amazon" in p['url'].lower() or "facebook" in p['url'].lower() or "instagram" in p[
-                            'url'].lower() or "twitter" in p['url'].lower() for p in products):
-                    logger.warning(
-                        f"Encontrados {len(products)} produtos, reiniciando devido a 'Preço não disponível' ou domínios excluídos")
-                    attempt += 1
-                    continue
                 else:
                     print(f"Encontrados {len(products)} produtos com preço em reais na tentativa {attempt + 1}")
                     break
             except Exception as e:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 attempt += 1
+                if attempt >= max_attempts:
+                    logger.error(f"Limite de {max_attempts} tentativas atingido. Retornando {len(products)} produtos.")
+                    break
+                self._initialize_driver()
                 continue
         return products[:5]
 
