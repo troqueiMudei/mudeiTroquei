@@ -443,7 +443,7 @@ class ProdutoFinder:
             brazilian_domains = [
                 '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
                 'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br',
-                'extra.com.br', 'centauro.com.br', 'kanui.com.br', 'dafiti.com.br'
+                'extra.com.br', 'centauro.com.br', 'kanui.com.br', 'dafiti.com.br', 'zoom.com.br'
             ]
             # Domínios a excluir (redes sociais e Amazon com todas as variações)
             excluded_domains = [
@@ -471,18 +471,20 @@ class ProdutoFinder:
                                 price_text) and len(products) < 5:
                             price_value = self._safe_extract_price_from_string(price_text)
                             if price_value > 0:
-                                img = element.find_elements(By.XPATH, ".//img")
-                                img_url = img[0].get_attribute('src') if img else None
-                                products.append({
-                                    'nome': name,
-                                    'preco': f"R$ {price_value:.2f}",
-                                    'url': url,
-                                    'img': img_url
-                                })
-                                logger.info(
-                                    f"Produto brasileiro com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                                # Verifica se o item é novo
+                                if any(keyword in name.lower() for keyword in ['novo', 'new', 'nueva']):
+                                    img = element.find_elements(By.XPATH, ".//img")
+                                    img_url = img[0].get_attribute('src') if img else None
+                                    products.append({
+                                        'nome': name,
+                                        'preco': f"R$ {price_value:.2f}",
+                                        'url': url,
+                                        'img': img_url
+                                    })
+                                    logger.info(
+                                        f"Produto brasileiro novo com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                         else:
-                            logger.debug(f"Item sem preço válido ou ignorado: {url} - {price_text}")
+                            logger.debug(f"Item sem preço válido ou não novo: {url} - {price_text}")
                     else:
                         logger.debug(f"URL excluída (domínio indesejado): {url}")
                 except Exception as e:
@@ -1500,7 +1502,7 @@ class ProdutoFinder:
         com preços exclusivamente em reais de sites aceitáveis, excluindo Amazon e redes sociais"""
         products = []
         attempt = 0
-        max_attempts = 60  # Aumentado para garantir mais tentativas
+        max_attempts = 2000  # Limite de segurança para evitar loops infinitos
         while len(products) < 5:
             try:
                 self.driver.delete_all_cookies()
