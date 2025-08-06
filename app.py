@@ -204,13 +204,13 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento, aceitando exclusivamente preços em reais (R$)"""
+        """Extrai preço do elemento, aceitando exclusivamente preços em reais (R$) ou dólares ($) para conversão"""
         try:
             price_selectors = [
-                ".//span[contains(text(), 'R$') and contains(@class, 'price')]",
-                ".//div[contains(text(), 'R$') and contains(@class, 'price')]",
-                ".//span[contains(text(), 'R$') and contains(@class, 'formatted-price')]",
-                ".//div[contains(text(), 'R$') and contains(@class, 'sh-price')]"
+                ".//span[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'price')]",
+                ".//div[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'price')]",
+                ".//span[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'formatted-price')]",
+                ".//div[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'sh-price')]"
             ]
 
             for selector in price_selectors:
@@ -218,7 +218,7 @@ class ProdutoFinder:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
                     if price_text and self._is_valid_price_text(price_text):
-                        logger.info(f"Preço em reais encontrado: {price_text} (seletor: {selector})")
+                        logger.info(f"Preço encontrado: {price_text} (seletor: {selector})")
                         return price_text
                 except Exception as e:
                     logger.debug(f"Seletor {selector} falhou: {str(e)}")
@@ -226,33 +226,33 @@ class ProdutoFinder:
 
             try:
                 full_text = element.text
-                price_pattern = r'R\$?\s*[\d,.]+(?:[,.]\d{2})?'
+                price_pattern = r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?'
                 matches = re.findall(price_pattern, full_text, re.IGNORECASE)
                 for match in matches:
                     if self._is_valid_price_text(match):
-                        logger.info(f"Preço em reais encontrado no texto completo: {match}")
+                        logger.info(f"Preço encontrado no texto completo: {match}")
                         return match
             except Exception as e:
                 logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
-            logger.warning("Nenhum preço válido em reais encontrado")
+            logger.warning("Nenhum preço válido encontrado")
             return "Preço não disponível"
         except Exception as e:
             logger.error(f"Erro geral na extração de preço: {str(e)}")
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido exclusivamente em reais (R$), rejeitando outras moedas e 'Preço não disponível'"""
+        """Verifica se o texto é um preço válido em reais (R$) ou dólares ($)"""
         if not text or not isinstance(text, str) or text == "Preço não disponível":
             return False
 
-        # Rejeita qualquer texto que contenha $, €, £ ou outras moedas
-        if 'R$' in text and not any(sym in text for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
+        # Aceita preços com R$ ou $ (para conversão a reais)
+        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
             price_patterns = [
-                r'R\$?\s*[\d,.]+(?:[,.]\d{2})?',
-                r'[\d]+[.,][\d]+(?:\s*R\$)?',
-                r'[\d]+(?:\s*reais)?',
-                r'(?:de|por)\s*R\$?\s*[\d,.]+'
+                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
+                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
+                r'[\d]+(?:\s*(?:reais|dólares))?',
+                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+'
             ]
             for pattern in price_patterns:
                 if re.fullmatch(pattern, text.strip(), re.IGNORECASE):
@@ -449,7 +449,8 @@ class ProdutoFinder:
             excluded_domains = [
                 'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
                 'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
-                'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn'
+                'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn',
+                'amzn.to', 'a.co', 'amazon-adsystem.com', 'amazonaws.com'
             ]
 
             product_elements = self.driver.find_elements(By.XPATH,
@@ -472,6 +473,63 @@ class ProdutoFinder:
                             price_value = self._safe_extract_price_from_string(price_text)
                             if price_value > 0:
                                 # Verifica se o item é novo
+                                if any(keyword in name.lower() for keyword in ['novo', 'new', 'nueva']):
+                                    img = element.find_elements(By.XPATH, ".//img")
+                                    img_url = img[0].get_attribute('src') if img else None
+                                    products.append({
+                                        'nome': name,
+                                        'preco': f"R$ {price_value:.2f}",
+                                        'url': url,
+                                        'img': img_url
+                                    })
+                                    logger.info(
+                                        f"Produto brasileiro novo com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                        else:
+                            logger.debug(f"Item sem preço válido ou não novo: {url} - {price_text}")
+                    else:
+                        logger.debug(f"URL excluída (domínio indesejado): {url}")
+                except Exception as e:
+                    logger.debug(f"Erro ao extrair produto: {str(e)}")
+                    continue
+        except Exception as e:
+            logger.error(
+                f"Erro geral naExtract products from the page, limiting to Brazilian commercial sites with prices in reais, excluding social media, Amazon, and items without a price"""
+            products = []
+        try:
+            # Acceptable Brazilian domains (expanded)
+            brazilian_domains = [
+                '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
+                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br',
+                'extra.com.br', 'centauro.com.br', 'kanui.com.br', 'dafiti.com.br', 'zoom.com.br'
+            ]
+            # Domains to exclude (social media and Amazon with all variations)
+            excluded_domains = [
+                'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
+                'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
+                'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn',
+                'amzn.to', 'a.co', 'amazon-adsystem.com', 'amazonaws.com'
+            ]
+
+            product_elements = self.driver.find_elements(By.XPATH,
+                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
+            for element in product_elements:
+                try:
+                    name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
+                    name = name_element.text.strip()
+                    url_element = element.find_element(By.XPATH, ".//a[@href]")
+                    url = url_element.get_attribute('href')
+
+                    # Check if it's a Brazilian domain and not in the excluded list
+                    is_brazilian = '.com.br' in url.lower() or any(
+                        domain in url.lower() for domain in brazilian_domains)
+                    is_excluded = any(excluded in url.lower() for excluded in excluded_domains)
+                    if is_brazilian and not is_excluded:
+                        price_text = self._safe_extract_price(element)
+                        if name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                                price_text) and len(products) < 5:
+                            price_value = self._safe_extract_price_from_string(price_text)
+                            if price_value > 0:
+                                # Check if the item is new
                                 if any(keyword in name.lower() for keyword in ['novo', 'new', 'nueva']):
                                     img = element.find_elements(By.XPATH, ".//img")
                                     img_url = img[0].get_attribute('src') if img else None
@@ -1502,7 +1560,7 @@ class ProdutoFinder:
         com preços exclusivamente em reais de sites aceitáveis, excluindo Amazon e redes sociais"""
         products = []
         attempt = 0
-        max_attempts = 2000  # Limite de segurança para evitar loops infinitos
+        max_attempts = 20  # Limite de segurança para evitar loops infinitos
         while len(products) < 5:
             try:
                 self.driver.delete_all_cookies()
@@ -1538,7 +1596,8 @@ class ProdutoFinder:
                     excluded in p['url'].lower() for excluded in [
                         'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
                         'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
-                        'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn'
+                        'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn',
+                        'amzn.to', 'a.co', 'amazon-adsystem.com', 'amazonaws.com'
                     ])]
                 products = valid_products
                 if len(products) < 5:
@@ -1566,7 +1625,7 @@ class ProdutoFinder:
     def _safe_extract_price_from_string(self, price_str):
         """
         Extrai e converte um preço de uma string para um float em reais,
-        aceitando apenas preços com R$ e rejeitando outras moedas.
+        aceitando preços com R$ ou convertendo $ para reais (1 USD = 5.5 BRL).
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
@@ -1574,34 +1633,57 @@ class ProdutoFinder:
         is_negative = price_str.startswith('-')
         price_str = price_str.replace('-', '').strip()
 
-        if 'R$' not in price_str or any(sym in price_str for sym in ['$', '€', '£', 'USD', 'EUR', 'GBP']):
-            logger.warning(f"Preço ignorado (não em reais ou moeda inválida detectada): {price_str}")
-            return 0.0
-
-        price_str = price_str.replace('R$', '').strip()
-        price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
-
-        dot_pos = price_str.rfind('.')
-        comma_pos = price_str.rfind(',')
-
-        if dot_pos == -1 and comma_pos == -1:
-            number_str = price_str
-        elif dot_pos == -1:
-            number_str = price_str.replace('.', '').replace(',', '.')
-        elif comma_pos == -1:
-            number_str = price_str.replace(',', '')
-        else:
-            if dot_pos > comma_pos:
+        if '$' in price_str and 'R$' not in price_str:
+            # Preço em dólares, converter para reais (1 USD = 5.5 BRL)
+            price_str = price_str.replace('$', '').strip()
+            price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
+            dot_pos = price_str.rfind('.')
+            comma_pos = price_str.rfind(',')
+            if dot_pos == -1 and comma_pos == -1:
+                number_str = price_str
+            elif dot_pos == -1:
+                number_str = price_str.replace('.', '').replace(',', '.')
+            elif comma_pos == -1:
                 number_str = price_str.replace(',', '')
             else:
+                if dot_pos > comma_pos:
+                    number_str = price_str.replace(',', '')
+                else:
+                    number_str = price_str.replace('.', '').replace(',', '.')
+            try:
+                number = float(number_str)
+                if is_negative:
+                    number = -number
+                # Converter para reais
+                logger.info(f"Convertido de $ {number:.2f} para R$ {number * 5.5:.2f}")
+                return number * 5.5
+            except ValueError:
+                return 0.0
+        elif 'R$' in price_str:
+            price_str = price_str.replace('R$', '').strip()
+            price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
+            dot_pos = price_str.rfind('.')
+            comma_pos = price_str.rfind(',')
+            if dot_pos == -1 and comma_pos == -1:
+                number_str = price_str
+            elif dot_pos == -1:
                 number_str = price_str.replace('.', '').replace(',', '.')
-
-        try:
-            number = float(number_str)
-            if is_negative:
-                number = -number
-            return number
-        except ValueError:
+            elif comma_pos == -1:
+                number_str = price_str.replace(',', '')
+            else:
+                if dot_pos > comma_pos:
+                    number_str = price_str.replace(',', '')
+                else:
+                    number_str = price_str.replace('.', '').replace(',', '.')
+            try:
+                number = float(number_str)
+                if is_negative:
+                    number = -number
+                return number
+            except ValueError:
+                return 0.0
+        else:
+            logger.warning(f"Preço em moeda não identificada: {price_str}")
             return 0.0
 
     def calcular_valores_estimados(self, ficha):
