@@ -204,13 +204,17 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento, aceitando preços em reais (R$) ou dólares ($)"""
+        """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'price')]",
-                ".//div[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'price')]",
-                ".//span[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'formatted-price')]",
-                ".//div[contains(text(), 'R$') or contains(text(), '$') and contains(@class, 'sh-price')]"
+                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
+                ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
+                ".//span[@aria-hidden='true']",
+                ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
+                ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
+                ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
+                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
 
             for selector in price_selectors:
@@ -226,7 +230,7 @@ class ProdutoFinder:
 
             try:
                 full_text = element.text
-                price_pattern = r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?'
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
                 matches = re.findall(price_pattern, full_text, re.IGNORECASE)
                 for match in matches:
                     if self._is_valid_price_text(match):
@@ -243,12 +247,21 @@ class ProdutoFinder:
 
     def _is_valid_price_text(self, text):
         """Verifica se o texto é um preço válido em reais (R$) ou dólares ($)"""
-        if not text or not isinstance(text, str) or text == "Preço não disponível":
+        if not text or not isinstance(text, str):
             return False
 
-        # Aceita preços com R$ ou $, rejeitando outras moedas
-        if ('R$' in text or '$' in text) and not any(sym in text for sym in ['€', '£', 'USD', 'EUR', 'GBP']):
-            return True
+        # Aceita preços com R$ ou $ (para conversão)
+        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
+            price_patterns = [
+                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
+                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
+                r'[\d]+(?:\s*(?:reais|BRL|dólares|USD))',
+                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+',
+                r'[\d,.]+(?:\s*(?:reais|dólares))?',
+            ]
+            for pattern in price_patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
         return False
 
     def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
@@ -384,14 +397,7 @@ class ProdutoFinder:
         try:
             brazilian_domains = [
                 '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
-                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br',
-                'extra.com.br', 'centauro.com.br', 'kanui.com.br', 'dafiti.com.br', 'zoom.com.br'
-            ]
-            excluded_domains = [
-                'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
-                'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
-                'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn',
-                'amzn.to', 'a.co', 'amazon-adsystem.com', 'amazonaws.com'
+                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
             ]
 
             product_elements = self.driver.find_elements(By.XPATH,
@@ -400,38 +406,32 @@ class ProdutoFinder:
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
                     name = name_element.text.strip()
+                    price_text = self._safe_extract_price(element)
                     url_element = element.find_element(By.XPATH, ".//a[@href]")
                     url = url_element.get_attribute('href')
 
-                    is_brazilian = '.com.br' in url.lower() or any(
-                        domain in url.lower() for domain in brazilian_domains)
-                    is_excluded = any(excluded in url.lower() for excluded in excluded_domains)
-                    if is_brazilian and not is_excluded:
-                        price_text = self._safe_extract_price(element)
-                        if name and price_text != "Preço não disponível" and self._is_valid_price_text(
-                                price_text) and len(products) < 5:
-                            price_value = self._safe_extract_price_from_string(price_text)
-                            if price_value > 0 and any(keyword in name.lower() for keyword in ['novo', 'new', 'nueva']):
-                                img = element.find_elements(By.XPATH, ".//img")
-                                img_url = img[0].get_attribute('src') if img else None
-                                products.append({
-                                    'nome': name,
-                                    'preco': f"R$ {price_value:.2f}",
-                                    'url': url,
-                                    'img': img_url
-                                })
-                                logger.info(
-                                    f"Produto brasileiro novo com preço em reais encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
-                        else:
-                            logger.debug(f"Item sem preço válido ou não novo: {url} - {price_text}")
+                    is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
+                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
+                            price_text):
+                        price_value = self._safe_extract_price_from_string(price_text)
+                        img = element.find_elements(By.XPATH, ".//img")
+                        img_url = img[0].get_attribute('src') if img else None
+                        products.append({
+                            'nome': name,
+                            'preco': f"R$ {price_value:.2f}",
+                            'url': url,
+                            'img': img_url
+                        })
+                        logger.info(f"Produto brasileiro encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(f"URL excluída (domínio indesejado): {url}")
+                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
         except Exception as e:
             logger.error(f"Erro geral na extração de produtos: {str(e)}")
-        return products
+
+        return products[:5]
 
     def _extract_products_alternative(self):
         """Método alternativo quando o principal falha"""
@@ -819,6 +819,7 @@ class ProdutoFinder:
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--window-size=1280,720")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
         try:
             self.driver = webdriver.Chrome(
                 service=Service(executable_path='/usr/bin/chromedriver'),
@@ -1120,19 +1121,10 @@ class ProdutoFinder:
 
     def _check_for_captcha(self):
         """Verifica se há captcha na página"""
-        captcha_selectors = [
-            "div#captcha",
-            "div.recaptcha",
-            "iframe[src*='recaptcha']",
-            "div[class*='captcha']"
-        ]
-        for selector in captcha_selectors:
-            try:
-                if self.driver.find_elements(By.CSS_SELECTOR, selector):
-                    return True
-            except:
-                continue
-        return False
+        try:
+            return self.driver.find_element(By.ID, 'recaptcha') is not None
+        except:
+            return False
 
     def _extract_with_javascript(self):
         """Fallback com extração via JavaScript"""
@@ -1419,12 +1411,10 @@ class ProdutoFinder:
                 continue
         return produto
 
-    def _executar_busca(self, search_url, search_query):
-        """Executa a busca no Google Lens, looping até encontrar 5 produtos com preços em reais"""
+    def _executar_busca(self, search_url):
+        """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
         products = []
-        attempt = 0
-        max_attempts = 20
-        while len(products) < 5:
+        for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
                 if '?' in search_url:
@@ -1453,36 +1443,15 @@ class ProdutoFinder:
                     print(f"Não encontrou aba Shopping: {str(e)}")
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
-                products = self._extract_products_selenium(search_query)
-                valid_products = [p for p in products if p['preco'] != "Preço não disponível" and not any(
-                    excluded in p['url'].lower() for excluded in [
-                        'facebook.com', 'fb.com', 'm.facebook.com', 'facebook.net', 'instagram.com', 'instagr.am',
-                        'x.com', 'twitter.com', 't.co', 'amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
-                        'amazon.ca', 'amazon.in', 'amazon.com.br', 'amazon.es', 'amazon.it', 'amazon.jp', 'amazon.cn',
-                        'amzn.to', 'a.co', 'amazon-adsystem.com', 'amazonaws.com'
-                    ])]
-                products = valid_products
-                if len(products) < 5:
-                    logger.warning(f"Encontrados {len(products)} produtos válidos, reiniciando busca")
-                    attempt += 1
-                    if attempt >= max_attempts:
-                        logger.error(
-                            f"Limite de {max_attempts} tentativas atingido. Retornando {len(products)} produtos.")
-                        break
-                    self._initialize_driver()
-                    continue
-                else:
-                    print(f"Encontrados {len(products)} produtos com preço em reais na tentativa {attempt + 1}")
+                products = self._extract_products_selenium()
+                if products:
+                    print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
             except Exception as e:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
-                attempt += 1
-                if attempt >= max_attempts:
-                    logger.error(f"Limite de {max_attempts} tentativas atingido. Retornando {len(products)} produtos.")
-                    break
-                self._initialize_driver()
-                continue
-        return products[:5]
+                if attempt < self.max_retries - 1:
+                    self._initialize_driver()
+        return products
 
     def _safe_extract_price_from_string(self, price_str):
         """
