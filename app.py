@@ -243,6 +243,119 @@ class ProdutoFinder:
 
         return products[:5]
 
+    def calcular_valores_estimados(self, ficha):
+        precos = []
+        for produto in ficha.get('produtos_similares', []):
+            preco = self._safe_extract_price_from_string(produto.get('preco', ''))
+            if preco > 0:
+                precos.append(preco)
+
+        if precos:
+            media_precos = sum(precos) / len(precos)
+            valor_de_mercado = media_precos * 0.5
+        else:
+            valor_de_mercado = float(ficha.get('valor', 0))
+
+        valores = {
+            'valorDeMercado': {
+                'base': valor_de_mercado,
+                'imposto': valor_de_mercado * 0.06,
+                'comissao': valor_de_mercado * 0.15,
+                'cartaoCredito': valor_de_mercado * 0.05
+            },
+            'valorEstimado': {
+                'base': valor_de_mercado * 1.05,
+                'imposto': (valor_de_mercado * 1.05) * 0.06,
+                'comissao': (valor_de_mercado * 1.05) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05) * 0.05
+            },
+            'demandaMedia': {
+                'base': valor_de_mercado * 1.05 * 1.05,
+                'imposto': (valor_de_mercado * 1.05 * 1.05) * 0.06,
+                'comissao': (valor_de_mercado * 1.05 * 1.05) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05 * 1.05) * 0.05
+            },
+            'demandaAlta': {
+                'base': valor_de_mercado * 1.05 * 1.10,
+                'imposto': (valor_de_mercado * 1.05 * 1.10) * 0.06,
+                'comissao': (valor_de_mercado * 1.05 * 1.10) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05 * 1.10) * 0.05
+            }
+        }
+
+        for tipo in valores:
+            valores[tipo]['totalDespesas'] = (
+                    valores[tipo]['imposto'] + valores[tipo]['comissao'] + valores[tipo]['cartaoCredito']
+            )
+            valores[tipo]['totalFinal'] = valores[tipo]['base'] - valores[tipo]['totalDespesas']
+
+        ficha['valoresEstimados'] = valores
+        ficha['valorOriginal'] = float(ficha.get('valor', 0))
+
+        return ficha
+
+    def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
+        try:
+            if image is not None:
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                optimal_size = (1000, 1000)
+                image.thumbnail(optimal_size, Image.LANCZOS)
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1.2)
+                image = image.filter(ImageFilter.SHARPEN)
+                img_buffer = io.BytesIO()
+                image.save(img_buffer, format='JPEG', quality=90)
+                img_buffer.seek(0)
+                files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+            elif image_data is not None:
+                img = Image.open(io.BytesIO(image_data))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                optimal_size = (1000, 1000)
+                img.thumbnail(optimal_size, Image.LANCZOS)
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(1.2)
+                img = img.filter(ImageFilter.SHARPEN)
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format='JPEG', quality=90)
+                img_buffer.seek(0)
+                files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+            elif image_url is not None:
+                headers = {'User-Agent': random.choice(self.user_agents)}
+                response = requests.get(image_url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    img = Image.open(io.BytesIO(response.content))
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    optimal_size = (1000, 1000)
+                    img.thumbnail(optimal_size, Image.LANCZOS)
+                    enhancer = ImageEnhance.Contrast(img)
+                    img = enhancer.enhance(1.2)
+                    img = img.filter(ImageFilter.SHARPEN)
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='JPEG', quality=90)
+                    img_buffer.seek(0)
+                    files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
+                else:
+                    return image_url
+            else:
+                logger.error("No valid image input provided.")
+                return None
+
+            response = requests.post(
+                'https://api.imgbb.com/1/upload',
+                params={'key': '8234882d2cc5bc9c7f2f239283951076'},
+                files=files,
+                timeout=30
+            )
+            if response.status_code == 200 and 'data' in response.json() and 'url' in response.json()['data']:
+                return response.json()['data']['url']
+            return image_url if image_url else None
+        except Exception as e:
+            logger.error(f"Error converting image: {str(e)}")
+            return image_url if image_url else None
+
     def _executar_busca(self, search_url):
         """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
         products = []
@@ -648,9 +761,7 @@ def test_db():
 
 @app.route('/preview_ficha', methods=['POST'])
 def preview_ficha():
-    """Rota para visualizar os dados do formulário antes de cadastrar"""
     try:
-        # Coleta dos dados do formulário
         form_data = {
             'nome': request.form.get('nome', ''),
             'cpf': request.form.get('cpf', ''),
@@ -678,7 +789,6 @@ def preview_ficha():
             'imagem_url': None,
             'produtos_similares': []
         }
-        # Processar imagem
         if 'imagem' in request.files:
             imagem = request.files['imagem']
             if imagem.filename != '':
@@ -686,15 +796,12 @@ def preview_ficha():
                     img = Image.open(imagem)
                     img_url = finder._convert_image_to_url(image=img)
                     form_data['imagem_url'] = img_url
-                    # Buscar produtos similares
                     if img_url:
                         form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
                 except Exception as e:
                     logger.error(f"Erro ao processar imagem: {str(e)}")
                     form_data['erro_imagem'] = str(e)
-        # Converter bairro ID para nome
         form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
-        # Formatar data
         if form_data['data_compra']:
             try:
                 data_obj = datetime.strptime(form_data['data_compra'], '%Y-%m-%d')
@@ -703,7 +810,6 @@ def preview_ficha():
                 form_data['data_compra_br'] = form_data['data_compra']
         else:
             form_data['data_compra_br'] = "Não informada"
-        # Calcular valores estimados com base nos itens similares
         form_data = finder.calcular_valores_estimados(form_data)
         return render_template('preview_ficha.html', ficha=form_data)
     except Exception as e:
