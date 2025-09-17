@@ -110,7 +110,6 @@ DB_CONFIG = {
     'pool_reset_session': True
 }
 
-
 # Classe para buscar produtos por imagem no Google Lens
 class ProdutoFinder:
     def __init__(self):
@@ -142,7 +141,6 @@ class ProdutoFinder:
             return False
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
                 ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
@@ -184,11 +182,9 @@ class ProdutoFinder:
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido em reais (R$) ou dólares ($)"""
         if not text or not isinstance(text, str):
             return False
 
-        # Aceita preços com R$ ou $ (para conversão)
         if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
             price_patterns = [
                 r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
@@ -202,30 +198,39 @@ class ProdutoFinder:
                     return True
         return False
 
+    def _safe_extract_price_from_string(self, price_text):
+        try:
+            # Remove símbolos e converte para float
+            price_text = price_text.replace('R$', '').replace('$', '').replace('.', '').replace(',', '.').strip()
+            value = float(re.sub(r'[^\d.]', '', price_text))
+            if 'USD' in price_text or '$' in price_text:
+                value *= 5.5  # Conversão aproximada USD para BRL
+            return value
+        except (ValueError, AttributeError):
+            return 0.0
+
     def _extract_products_selenium(self, search_query):
-        """Extrai produtos da página, limitando a sites brasileiros comerciais com preços em reais,
-        excluindo redes sociais, Amazon e itens sem preço"""
         products = []
         try:
             brazilian_domains = [
                 '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
-                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
+                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br', 'olx.com.br'
             ]
 
             product_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
-            for element in product_elements:
+            for element in product_elements[:5]:  # Limita a 5 itens
                 try:
                     name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
                     name = name_element.text.strip()
                     price_text = self._safe_extract_price(element)
                     url_element = element.find_element(By.XPATH, ".//a[@href]")
                     url = url_element.get_attribute('href')
+                    img_elements = element.find_elements(By.XPATH, ".//img")
+                    img_url = img_elements[0].get_attribute('src') if img_elements else None
 
                     is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
                     if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
-                        img = element.find_elements(By.XPATH, ".//img")
-                        img_url = img[0].get_attribute('src') if img else None
                         products.append({
                             'nome': name,
                             'preco': f"R$ {price_value:.2f}",
@@ -241,58 +246,7 @@ class ProdutoFinder:
         except Exception as e:
             logger.error(f"Erro geral na extração de produtos: {str(e)}")
 
-        return products[:5]
-
-    def calcular_valores_estimados(self, ficha):
-        precos = []
-        for produto in ficha.get('produtos_similares', []):
-            preco = self._safe_extract_price_from_string(produto.get('preco', ''))
-            if preco > 0:
-                precos.append(preco)
-
-        if precos:
-            media_precos = sum(precos) / len(precos)
-            valor_de_mercado = media_precos * 0.5
-        else:
-            valor_de_mercado = float(ficha.get('valor', 0))
-
-        valores = {
-            'valorDeMercado': {
-                'base': valor_de_mercado,
-                'imposto': valor_de_mercado * 0.06,
-                'comissao': valor_de_mercado * 0.15,
-                'cartaoCredito': valor_de_mercado * 0.05
-            },
-            'valorEstimado': {
-                'base': valor_de_mercado * 1.05,
-                'imposto': (valor_de_mercado * 1.05) * 0.06,
-                'comissao': (valor_de_mercado * 1.05) * 0.15,
-                'cartaoCredito': (valor_de_mercado * 1.05) * 0.05
-            },
-            'demandaMedia': {
-                'base': valor_de_mercado * 1.05 * 1.05,
-                'imposto': (valor_de_mercado * 1.05 * 1.05) * 0.06,
-                'comissao': (valor_de_mercado * 1.05 * 1.05) * 0.15,
-                'cartaoCredito': (valor_de_mercado * 1.05 * 1.05) * 0.05
-            },
-            'demandaAlta': {
-                'base': valor_de_mercado * 1.05 * 1.10,
-                'imposto': (valor_de_mercado * 1.05 * 1.10) * 0.06,
-                'comissao': (valor_de_mercado * 1.05 * 1.10) * 0.15,
-                'cartaoCredito': (valor_de_mercado * 1.05 * 1.10) * 0.05
-            }
-        }
-
-        for tipo in valores:
-            valores[tipo]['totalDespesas'] = (
-                    valores[tipo]['imposto'] + valores[tipo]['comissao'] + valores[tipo]['cartaoCredito']
-            )
-            valores[tipo]['totalFinal'] = valores[tipo]['base'] - valores[tipo]['totalDespesas']
-
-        ficha['valoresEstimados'] = valores
-        ficha['valorOriginal'] = float(ficha.get('valor', 0))
-
-        return ficha
+        return products
 
     def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
         try:
@@ -356,24 +310,23 @@ class ProdutoFinder:
             logger.error(f"Error converting image: {str(e)}")
             return image_url if image_url else None
 
-    def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
+    def buscar_produtos_por_url(self, image_url):
         products = []
         for attempt in range(self.max_retries):
             try:
+                if not self._initialize_driver():
+                    logger.error(f"Tentativa {attempt + 1} falhou: Falha ao inicializar o driver")
+                    continue
                 self.driver.delete_all_cookies()
-                if '?' in search_url:
-                    search_url += '&gl=br&hl=pt-BR'
-                else:
-                    search_url += '?gl=br&hl=pt-BR'
-                print(f"\nTentativa {attempt + 1} - Acessando URL: {search_url}")
+                search_url = f"{self.base_url}{urllib.parse.quote(image_url)}&gl=br&hl=pt-BR"
+                logger.info(f"Tentativa {attempt + 1} - Acessando URL: {search_url}")
                 self.driver.get(search_url)
                 time.sleep(10)
                 for y in [500, 1000, 1500, 2000]:
                     self.driver.execute_script(f"window.scrollTo(0, {y});")
                     time.sleep(2)
                 if self._check_for_captcha():
-                    print("Captcha detectado! Tentando contornar...")
+                    logger.warning("Captcha detectado! Tentando contornar...")
                     time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
@@ -384,28 +337,27 @@ class ProdutoFinder:
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
                     time.sleep(3)
                 except Exception as e:
-                    print(f"Não encontrou aba Shopping: {str(e)}")
+                    logger.debug(f"Não encontrou aba Shopping: {str(e)}")
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
-                products = self._extract_products_selenium()
+                products = self._extract_products_selenium(image_url)
                 if products:
-                    print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
+                    logger.info(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
             except Exception as e:
-                print(f"Tentativa {attempt + 1} falhou: {str(e)}")
+                logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
+        self.cleanup()
         return products
 
     def _check_for_captcha(self):
-        """Verifica se há captcha na página"""
         try:
             return self.driver.find_element(By.ID, 'recaptcha') is not None
         except:
             return False
 
     def cleanup(self):
-        """Encerra o driver de forma segura"""
         try:
             if self.driver:
                 self.driver.quit()
@@ -415,8 +367,58 @@ class ProdutoFinder:
         finally:
             self.driver = None
 
-finder = ProdutoFinder()
+    def calcular_valores_estimados(self, ficha):
+        precos = []
+        for produto in ficha.get('produtos_similares', []):
+            preco = self._safe_extract_price_from_string(produto.get('preco', ''))
+            if preco > 0:
+                precos.append(preco)
 
+        if precos:
+            media_precos = sum(precos) / len(precos)
+            valor_de_mercado = media_precos * 0.5
+        else:
+            valor_de_mercado = float(ficha.get('valor', 0))
+
+        valores = {
+            'valorDeMercado': {
+                'base': valor_de_mercado,
+                'imposto': valor_de_mercado * 0.06,
+                'comissao': valor_de_mercado * 0.15,
+                'cartaoCredito': valor_de_mercado * 0.05
+            },
+            'valorEstimado': {
+                'base': valor_de_mercado * 1.05,
+                'imposto': (valor_de_mercado * 1.05) * 0.06,
+                'comissao': (valor_de_mercado * 1.05) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05) * 0.05
+            },
+            'demandaMedia': {
+                'base': valor_de_mercado * 1.05 * 1.05,
+                'imposto': (valor_de_mercado * 1.05 * 1.05) * 0.06,
+                'comissao': (valor_de_mercado * 1.05 * 1.05) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05 * 1.05) * 0.05
+            },
+            'demandaAlta': {
+                'base': valor_de_mercado * 1.05 * 1.10,
+                'imposto': (valor_de_mercado * 1.05 * 1.10) * 0.06,
+                'comissao': (valor_de_mercado * 1.05 * 1.10) * 0.15,
+                'cartaoCredito': (valor_de_mercado * 1.05 * 1.10) * 0.05
+            }
+        }
+
+        for tipo in valores:
+            valores[tipo]['totalDespesas'] = (
+                    valores[tipo]['imposto'] + valores[tipo]['comissao'] + valores[tipo]['cartaoCredito']
+            )
+            valores[tipo]['totalFinal'] = valores[tipo]['base'] - valores[tipo]['totalDespesas']
+
+        ficha['valoresEstimados'] = valores
+        ficha['valorOriginal'] = float(ficha.get('valor', 0))
+
+        return ficha
+
+finder = ProdutoFinder()
 
 # Função para obter uma conexão com o banco de dados
 def get_db_connection():
@@ -425,7 +427,6 @@ def get_db_connection():
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1} de conexão com o MySQL em {DB_CONFIG['host']}")
-            # Adicionando parâmetros para evitar "Unread result found"
             connection = mysql.connector.connect(
                 host=DB_CONFIG['host'],
                 port=DB_CONFIG['port'],
@@ -434,13 +435,12 @@ def get_db_connection():
                 database=DB_CONFIG['database'],
                 connection_timeout=30,
                 connect_timeout=30,
-                consume_results=True,  # Importante para evitar "Unread result found"
+                consume_results=True,
                 autocommit=True
             )
-            # Teste de conexão mais robusto
-            cursor = connection.cursor(buffered=True)  # Usando cursor buffered
+            cursor = connection.cursor(buffered=True)
             cursor.execute("SELECT 1")
-            cursor.fetchall()  # Garantindo que todos os resultados são lidos
+            cursor.fetchall()
             cursor.close()
             logger.info("Conexão com MySQL estabelecida com sucesso")
             return connection
@@ -459,7 +459,6 @@ def get_db_connection():
     logger.error("Falha ao conectar ao MySQL após várias tentativas")
     return None
 
-
 # Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)
@@ -467,47 +466,37 @@ def login_required(f):
         if not session.get('logged_in'):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-
     return decorated_function
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        # Validação simples (substitua por uma lógica de autenticação real)
         if username == 'admin' and password == 'admin123':
-            session['logged_in'] = True  # Define a sessão como logada
+            session['logged_in'] = True
             return redirect(url_for('lista_fichas'))
         else:
             return "Usuário ou senha inválidos", 401
     return render_template('login.html')
 
-
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)  # Remove o status de logado da sessão
+    session.pop('logged_in', None)
     return redirect(url_for('login'))
-
 
 @app.route('/')
 @login_required
 def lista_fichas():
-    """Página principal que lista todas as fichas com paginação"""
     status_filtro = request.args.get('status')
-    # Parâmetros de paginação
-    page = request.args.get('page', 1, type=int)  # Página atual (padrão: 1)
-    per_page = 15  # Itens por página
+    page = request.args.get('page', 1, type=int)
+    per_page = 15
     try:
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
         cursor = conn.cursor(dictionary=True)
-        # Consulta para contar o total de registros (para paginação)
-        count_sql = """
-        SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta
-        """
+        count_sql = "SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta"
         if status_filtro:
             count_sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
             cursor.execute(count_sql, (status_filtro,))
@@ -515,9 +504,7 @@ def lista_fichas():
             cursor.execute(count_sql)
         total_records = cursor.fetchone()['total']
         total_pages = math.ceil(total_records / per_page)
-        # Cálculo do offset para paginação
         offset = (page - 1) * per_page
-        # Consulta SQL para listar as fichas com paginação
         sql = """
         SELECT
             entry_id AS id,
@@ -555,19 +542,17 @@ def lista_fichas():
                     dados = phpserialize.loads(dados_serializados, decode_strings=True)
                     ficha['arquivo_url'] = dados['file']['file_url'][0]
                 except Exception as e:
-                    print(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
+                    logger.error(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
                     ficha['arquivo_url'] = None
             else:
                 ficha['arquivo_url'] = None
         cursor.close()
         conn.close()
-        # Calcular os valores para paginação
         start_page = page - 2 if page > 2 else 1
         end_page = start_page + 4
         if end_page > total_pages:
             end_page = total_pages
             start_page = end_page - 4 if end_page > 4 else 1
-        # Passando dados de paginação para o template
         pagination = {
             'page': page,
             'per_page': per_page,
@@ -581,17 +566,14 @@ def lista_fichas():
         logger.error(f"Erro ao listar fichas: {str(e)}")
         return f"Erro ao processar a solicitação: {str(e)}", 500
 
-
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    """Página de detalhes de uma ficha específica com busca de produtos similares"""
     try:
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
         cursor = conn.cursor(dictionary=True)
-        # Consulta SQL para obter detalhes da ficha
         sql = """
         SELECT
             entry_id AS id,
@@ -622,7 +604,6 @@ def detalhes_ficha(id):
             cursor.close()
             conn.close()
             return "Ficha não encontrada", 404
-        # Processar informação de arquivo (imagem)
         if ficha.get('arquivo'):
             try:
                 dados_serializados = ficha['arquivo'].encode('utf-8')
@@ -633,53 +614,37 @@ def detalhes_ficha(id):
                 ficha['arquivo_url'] = None
         else:
             ficha['arquivo_url'] = None
-        # Buscar produtos similares usando a imagem (se disponível)
         if ficha.get('arquivo_url'):
-            print(f"\nIniciando busca para imagem: {ficha['arquivo_url']}")
-            finder = ProdutoFinder()
-            try:
-                produtos = finder.buscar_produtos_por_url(ficha['arquivo_url'])
-                ficha['produtos_similares'] = produtos or []  # Garante lista vazia se None
-                # Debug adicional
-                if not produtos:
-                    print("Nenhum produto similar encontrado")
-                else:
-                    print(f"Encontrados {len(produtos)} produtos similares")
-            except Exception as e:
-                print(f"Erro na busca: {str(e)}")
-                ficha['produtos_similares'] = []
-            finally:
-                finder.cleanup()
+            logger.info(f"Iniciando busca para imagem: {ficha['arquivo_url']}")
+            produtos = finder.buscar_produtos_por_url(ficha['arquivo_url'])
+            ficha['produtos_similares'] = produtos or []
+            if not produtos:
+                logger.info("Nenhum produto similar encontrado")
+            else:
+                logger.info(f"Encontrados {len(produtos)} produtos similares")
         else:
             ficha['produtos_similares'] = []
-            print("Nenhuma URL de imagem disponível para busca")
-        # ficha['produtos_similares'] = produtos_similares or []
-        # Cálculo do valor estimado e outras informações (com tratamento para valores nulos)
+            logger.info("Nenhuma URL de imagem disponível para busca")
         try:
             valor_estimado = float(ficha.get('valor', '0'))
         except (ValueError, TypeError):
             valor_estimado = 0.0
         valor_estimado = valor_estimado * 1.05
-        # Adiciona os valores calculados à ficha
         ficha['valorEstimado'] = float(valor_estimado)
-        ficha['demandaMedia'] = float(valor_estimado * 1.05)  # +5%
-        ficha['demandaAlta'] = float(valor_estimado * 1.10)  # +10%
-        # Formatar data de compra para o formato brasileiro
+        ficha['demandaMedia'] = float(valor_estimado * 1.05)
+        ficha['demandaAlta'] = float(valor_estimado * 1.10)
         if ficha.get('dataDeCompra'):
             try:
-                # Tenta parsear a data para formato brasileiro
                 data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
                 ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
             except ValueError:
                 try:
-                    # Tenta parsear caso já esteja no formato DD/MM/YYYY
                     datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
                 except ValueError:
                     ficha['dataDeCompra_br'] = ficha['dataDeCompra']
         else:
             ficha['dataDeCompra_br'] = None
-        # Garantir valores padrão para dimensões
         ficha['altura'] = ficha.get('altura', '0')
         ficha['largura'] = ficha.get('largura', '0')
         ficha['profundidade'] = ficha.get('profundidade', '0')
@@ -687,21 +652,18 @@ def detalhes_ficha(id):
         conn.close()
         return render_template('detalhes_ficha.html', ficha=ficha)
     except Exception as e:
-        print(f"\nERRO GRAVE: {str(e)}")
+        logger.error(f"Erro ao processar detalhes da ficha: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao processar a ficha"), 500
-
 
 @app.route('/atualizar_status/<int:id>', methods=['POST'])
 @login_required
 def atualizar_status(id):
-    """Rota para atualizar o status de uma ficha"""
     novo_status = request.form['status']
     try:
         conn = get_db_connection()
         if not conn:
             return "Erro ao conectar ao banco de dados", 500
         cursor = conn.cursor()
-        # Atualizar o status na tabela
         sql = """
         UPDATE frmt_form_entry_meta
         SET meta_value = %s
@@ -716,10 +678,8 @@ def atualizar_status(id):
         logger.error(f"Erro ao atualizar status: {str(e)}")
         return f"Erro ao processar a solicitação: {str(e)}", 500
 
-
 @app.route('/test-db')
 def test_db():
-    """Rota para testar a conexão com o banco de dados"""
     try:
         conn = get_db_connection()
         if conn:
@@ -757,7 +717,6 @@ def test_db():
                 'database': DB_CONFIG['database']
             }
         }
-
 
 @app.route('/preview_ficha', methods=['POST'])
 def preview_ficha():
@@ -816,25 +775,17 @@ def preview_ficha():
         logger.error(f"Erro ao processar pré-visualização: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao processar a pré-visualização"), 500
 
-
 @app.route('/nova_ficha')
 def nova_ficha():
-    """Exibe o formulário para cadastrar uma nova ficha"""
     return render_template('form_ficha.html', bairros=BAIRROS)
-
 
 @app.route('/cadastrar_ficha', methods=['POST'])
 def cadastrar_ficha():
-    """Rota para cadastrar a ficha após a pré-visualização"""
     try:
-        # Aqui você colocaria a lógica para inserir no banco de dados
-        # Similar ao que você já tem na rota de upload_produto do código antigo
-        # Após cadastrar, redireciona para a lista de fichas
         return redirect(url_for('lista_fichas'))
     except Exception as e:
         logger.error(f"Erro ao cadastrar ficha: {str(e)}")
         return render_template('erro.html', mensagem="Ocorreu um erro ao cadastrar a ficha"), 500
-
 
 if __name__ == '__main__':
     app.run(debug=True)
