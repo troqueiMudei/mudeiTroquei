@@ -88,7 +88,7 @@ BAIRROS = {
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
-# Configuração da conexão com o banco de dados MySQL
+# Configuração da conexão com o banco de dados MySQL - ORIGINAL
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '162.241.62.120'),
     'port': int(os.getenv('DB_PORT', '3306')),
@@ -319,7 +319,8 @@ class ProdutoFinder:
             return 0.0
 
     def calcular_valores_estimados(self, ficha):
-        precos = [self._safe_extract_price_from_string(p['preco']) for p in ficha.get('produtos_similares', []) if self._safe_extract_price_from_string(p['preco']) > 0]
+        precos = [self._safe_extract_price_from_string(p['preco']) for p in ficha.get('produtos_similares', []) if
+                  self._safe_extract_price_from_string(p['preco']) > 0]
         media_precos = sum(precos) / len(precos) if precos else 0.0
         valor_de_mercado = media_precos * 0.5 if media_precos > 0 else float(ficha.get('valor', 0))
         valor_base = valor_de_mercado
@@ -348,66 +349,116 @@ class ProdutoFinder:
             'totalFinal': total_final
         }
 
+
 finder = ProdutoFinder()
 
-def get_db_connection():
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except:
-        return None
 
+# Função para obter uma conexão com o banco de dados - ORIGINAL
+def get_db_connection():
+    max_retries = 3
+    retry_delay = 5
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Tentativa {attempt + 1} de conexão com o MySQL em {DB_CONFIG['host']}")
+            # Adicionando parâmetros para evitar "Unread result found"
+            connection = mysql.connector.connect(
+                host=DB_CONFIG['host'],
+                port=DB_CONFIG['port'],
+                user=DB_CONFIG['user'],
+                password=DB_CONFIG['password'],
+                database=DB_CONFIG['database'],
+                connection_timeout=30,
+                connect_timeout=30,
+                consume_results=True,  # Importante para evitar "Unread result found"
+                autocommit=True
+            )
+            # Teste de conexão mais robusto
+            cursor = connection.cursor(buffered=True)  # Usando cursor buffered
+            cursor.execute("SELECT 1")
+            cursor.fetchall()  # Garantindo que todos os resultados são lidos
+            cursor.close()
+            logger.info("Conexão com MySQL estabelecida com sucesso")
+            return connection
+        except mysql.connector.Error as err:
+            logger.error(f"Erro ao conectar ao MySQL (tentativa {attempt + 1}): {err}")
+            if err.errno == mysql.connector.errorcode.ER_UNKNOWN_ERROR and "Unread result found" in str(err):
+                logger.warning("Tentando reconectar após 'Unread result found'...")
+                time.sleep(retry_delay)
+                continue
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+        except Exception as e:
+            logger.error(f"Erro inesperado ao conectar ao MySQL: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+    logger.error("Falha ao conectar ao MySQL após várias tentativas")
+    return None
+
+
+# Decorator para verificar se o usuário está logado
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('logged_in'):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
+
     return decorated_function
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method =="POST":
-        if request.form['username'] == 'admin' and request.form['password'] == 'admin123':
-            session['logged_in'] = True
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        # Validação simples (substitua por uma lógica de autenticação real)
+        if username == 'admin' and password == 'admin123':
+            session['logged_in'] = True  # Define a sessão como logada
             return redirect(url_for('lista_fichas'))
         else:
             return "Usuário ou senha inválidos", 401
     return render_template('login.html')
 
+
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)
+    session.pop('logged_in', None)  # Remove o status de logado da sessão
     return redirect(url_for('login'))
+
 
 @app.route('/')
 @login_required
 def lista_fichas():
+    """Página principal que lista todas as fichas com paginação"""
     status_filtro = request.args.get('status')
-    page = request.args.get('page', 1, type=int)
-    per_page = 15
-    conn = get_db_connection()
-    if not conn:
-        return "Erro ao conectar ao banco de dados", 500
-    cursor = conn.cursor(dictionary=True)
-    count_sql = "SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta"
-    params = () if not status_filtro else (status_filtro,)
-    if status_filtro:
-        count_sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
-    cursor.execute(count_sql, params)
-    total_records = cursor.fetchone()['total']
-    total_pages = math.ceil(total_records / per_page)
-    offset = (page - 1) * per_page
-    sql = """
+    # Parâmetros de paginação
+    page = request.args.get('page', 1, type=int)  # Página atual (padrão: 1)
+    per_page = 15  # Itens por página
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
+        cursor = conn.cursor(dictionary=True)
+        # Consulta para contar o total de registros (para paginação)
+        count_sql = """
+        SELECT COUNT(DISTINCT entry_id) AS total FROM frmt_form_entry_meta
+        """
+        if status_filtro:
+            count_sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
+            cursor.execute(count_sql, (status_filtro,))
+        else:
+            cursor.execute(count_sql)
+        total_records = cursor.fetchone()['total']
+        total_pages = math.ceil(total_records / per_page)
+        # Cálculo do offset para paginação
+        offset = (page - 1) * per_page
+        # Consulta SQL para listar as fichas com paginação - ESTRUTURA ORIGINAL
+        sql = """
         SELECT
             entry_id AS id,
             MAX(CASE WHEN meta_key = 'name-1' THEN meta_value END) AS nome,
-            MAX(CASE WHEN meta_key = 'cpf-1' THEN meta_value END) AS cpf,
             MAX(CASE WHEN meta_key = 'phone-1' THEN meta_value END) AS telefone,
             MAX(CASE WHEN meta_key = 'email-1' THEN meta_value END) AS email,
-            MAX(CASE WHEN meta_key = 'produto-1' THEN meta_value END) AS produto,
-            MAX(CASE WHEN meta_key = 'marca-1' THEN meta_value END) AS marca,
-            MAX(CASE WHEN meta_key = 'quantidade-1' THEN meta_value END) AS quantidade,
             MAX(CASE WHEN meta_key = 'text-1' THEN meta_value END) AS descricao,
             MAX(CASE WHEN meta_key = 'text-3' THEN meta_value END) AS localCompra,
             MAX(CASE WHEN meta_key = 'text-4' THEN meta_value END) AS dataDeCompra,
@@ -421,60 +472,67 @@ def lista_fichas():
             MAX(CASE WHEN meta_key = 'number-3' THEN meta_value END) AS profundidade,
             MAX(CASE WHEN meta_key = 'radio-1' THEN meta_value END) AS troca,
             MAX(CASE WHEN meta_key = 'text-5' THEN meta_value END) AS text5,
-            MAX(CASE WHEN meta_key = 'bairro-1' THEN meta_value END) AS bairro,
-            MAX(CASE WHEN meta_key = 'outro_bairro-1' THEN meta_value END) AS outroBairro,
-            MAX(CASE WHEN meta_key = 'voltagem-1' THEN meta_value END) AS voltagem,
-            MAX(CASE WHEN meta_key = 'precisa_limpeza-1' THEN meta_value END) AS precisa_limpeza,
-            MAX(CASE WHEN meta_key = 'precisa_desmontagem-1' THEN meta_value END) AS precisa_desmontagem,
-            MAX(CASE WHEN meta_key = 'possui_nota_fiscal-1' THEN meta_value END) AS possui_nota_fiscal,
-            MAX(CASE WHEN meta_key = 'aceita_credito-1' THEN meta_value END) AS aceita_credito,
-            MAX(CASE WHEN meta_key = 'tipo_reparo-1' THEN meta_value END) AS tipo_reparo,
-            MAX(CASE WHEN meta_key = 'estado-1' THEN meta_value END) AS estado_json,
             MAX(CASE WHEN meta_key = 'upload-1' THEN meta_value END) AS arquivo
         FROM frmt_form_entry_meta
-    """
-    group_params = (per_page, offset)
-    if status_filtro:
-        sql += " WHERE entry_id IN (SELECT entry_id FROM frmt_form_entry_meta WHERE meta_key = 'radio-3' AND meta_value = %s)"
-        group_params = (status_filtro, per_page, offset)
-    sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
-    cursor.execute(sql, group_params)
-    fichas = cursor.fetchall()
-    for ficha in fichas:
-        if ficha.get('arquivo'):
-            try:
-                dados = phpserialize.loads(ficha['arquivo'].encode('utf-8'), decode_strings=True)
-                ficha['arquivo_url'] = dados['file']['file_url'][0]
-            except:
+        """
+        if status_filtro:
+            sql += " HAVING status = %s"
+            sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
+            cursor.execute(sql, (status_filtro, per_page, offset))
+        else:
+            sql += " GROUP BY entry_id ORDER BY id DESC LIMIT %s OFFSET %s"
+            cursor.execute(sql, (per_page, offset))
+        fichas = cursor.fetchall()
+        for ficha in fichas:
+            if ficha['arquivo']:
+                try:
+                    dados_serializados = ficha['arquivo'].encode('utf-8')
+                    dados = phpserialize.loads(dados_serializados, decode_strings=True)
+                    ficha['arquivo_url'] = dados['file']['file_url'][0]
+                except Exception as e:
+                    print(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
+                    ficha['arquivo_url'] = None
+            else:
                 ficha['arquivo_url'] = None
-        ficha['estado'] = json.loads(ficha.get('estado_json', '[]'))
-        ficha['bairro_nome'] = BAIRROS.get(int(ficha.get('bairro', 0)), "Bairro não encontrado")
-    cursor.close()
-    conn.close()
-    pagination = {
-        'page': page,
-        'total_pages': total_pages,
-        # add other
-    }
-    return render_template('lista_fichas.html', fichas=fichas, pagination=pagination, status_filtro=status_filtro)
+        cursor.close()
+        conn.close()
+        # Calcular os valores para paginação
+        start_page = page - 2 if page > 2 else 1
+        end_page = start_page + 4
+        if end_page > total_pages:
+            end_page = total_pages
+            start_page = end_page - 4 if end_page > 4 else 1
+        # Passando dados de paginação para o template
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages,
+            'total_records': total_records,
+            'start_page': start_page,
+            'end_page': end_page
+        }
+        return render_template('lista_fichas.html', fichas=fichas, pagination=pagination, status_filtro=status_filtro)
+    except Exception as e:
+        logger.error(f"Erro ao listar fichas: {str(e)}")
+        return f"Erro ao processar a solicitação: {str(e)}", 500
+
 
 @app.route('/detalhes/<int:id>')
 @login_required
 def detalhes_ficha(id):
-    conn = get_db_connection()
-    if not conn:
-        return "Erro ao conectar ao banco de dados", 500
-    cursor = conn.cursor(dictionary=True)
-    sql = """
+    """Página de detalhes de uma ficha específica com busca de produtos similares"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
+        cursor = conn.cursor(dictionary=True)
+        # Consulta SQL para obter detalhes da ficha - ESTRUTURA ORIGINAL
+        sql = """
         SELECT
             entry_id AS id,
             MAX(CASE WHEN meta_key = 'name-1' THEN meta_value END) AS nome,
-            MAX(CASE WHEN meta_key = 'cpf-1' THEN meta_value END) AS cpf,
             MAX(CASE WHEN meta_key = 'phone-1' THEN meta_value END) AS telefone,
             MAX(CASE WHEN meta_key = 'email-1' THEN meta_value END) AS email,
-            MAX(CASE WHEN meta_key = 'produto-1' THEN meta_value END) AS produto,
-            MAX(CASE WHEN meta_key = 'marca-1' THEN meta_value END) AS marca,
-            MAX(CASE WHEN meta_key = 'quantidade-1' THEN meta_value END) AS quantidade,
             MAX(CASE WHEN meta_key = 'text-1' THEN meta_value END) AS descricao,
             MAX(CASE WHEN meta_key = 'text-3' THEN meta_value END) AS localCompra,
             MAX(CASE WHEN meta_key = 'text-4' THEN meta_value END) AS dataDeCompra,
@@ -488,159 +546,294 @@ def detalhes_ficha(id):
             MAX(CASE WHEN meta_key = 'number-3' THEN meta_value END) AS profundidade,
             MAX(CASE WHEN meta_key = 'radio-1' THEN meta_value END) AS troca,
             MAX(CASE WHEN meta_key = 'text-5' THEN meta_value END) AS text5,
-            MAX(CASE WHEN meta_key = 'bairro-1' THEN meta_value END) AS bairro,
-            MAX(CASE WHEN meta_key = 'outro_bairro-1' THEN meta_value END) AS outroBairro,
-            MAX(CASE WHEN meta_key = 'voltagem-1' THEN meta_value END) AS voltagem,
-            MAX(CASE WHEN meta_key = 'precisa_limpeza-1' THEN meta_value END) AS precisa_limpeza,
-            MAX(CASE WHEN meta_key = 'precisa_desmontagem-1' THEN meta_value END) AS precisa_desmontagem,
-            MAX(CASE WHEN meta_key = 'possui_nota_fiscal-1' THEN meta_value END) AS possui_nota_fiscal,
-            MAX(CASE WHEN meta_key = 'aceita_credito-1' THEN meta_value END) AS aceita_credito,
-            MAX(CASE WHEN meta_key = 'tipo_reparo-1' THEN meta_value END) AS tipo_reparo,
-            MAX(CASE WHEN meta_key = 'estado-1' THEN meta_value END) AS estado_json,
             MAX(CASE WHEN meta_key = 'upload-1' THEN meta_value END) AS arquivo
         FROM frmt_form_entry_meta
         WHERE entry_id = %s
         GROUP BY entry_id
-    """
-    cursor.execute(sql, (id,))
-    ficha = cursor.fetchone()
-    if not ficha:
-        return "Ficha não encontrada", 404
-    if ficha.get('arquivo'):
-        try:
-            dados = phpserialize.loads(ficha['arquivo'].encode('utf-8'), decode_strings=True)
-            ficha['arquivo_url'] = dados['file']['file_url'][0]
-        except:
+        """
+        cursor.execute(sql, (id,))
+        ficha = cursor.fetchone()
+        if not ficha:
+            cursor.close()
+            conn.close()
+            return "Ficha não encontrada", 404
+        # Processar informação de arquivo (imagem)
+        if ficha.get('arquivo'):
+            try:
+                dados_serializados = ficha['arquivo'].encode('utf-8')
+                dados = phpserialize.loads(dados_serializados, decode_strings=True)
+                ficha['arquivo_url'] = dados['file']['file_url'][0]
+            except Exception as e:
+                logger.error(f"Erro ao desserializar arquivo da ficha ID {ficha['id']}: {e}")
+                ficha['arquivo_url'] = None
+        else:
             ficha['arquivo_url'] = None
-    if ficha['arquivo_url']:
-        produtos = finder.buscar_produtos_por_url(ficha['arquivo_url'])
-        ficha['produtos_similares'] = produtos
-    else:
-        ficha['produtos_similares'] = []
-    ficha = finder.calcular_valores_estimados(ficha)
-    if ficha.get('dataDeCompra'):
+        # Buscar produtos similares usando a imagem (se disponível)
+        if ficha.get('arquivo_url'):
+            print(f"\nIniciando busca para imagem: {ficha['arquivo_url']}")
+            finder_instance = ProdutoFinder()
+            try:
+                produtos = finder_instance.buscar_produtos_por_url(ficha['arquivo_url'])
+                ficha['produtos_similares'] = produtos or []  # Garante lista vazia se None
+                # Debug adicional
+                if not produtos:
+                    print("Nenhum produto similar encontrado")
+                else:
+                    print(f"Encontrados {len(produtos)} produtos similares")
+            except Exception as e:
+                print(f"Erro na busca: {str(e)}")
+                ficha['produtos_similares'] = []
+            finally:
+                finder_instance.cleanup()
+        else:
+            ficha['produtos_similares'] = []
+            print("Nenhuma URL de imagem disponível para busca")
+        # Cálculo do valor estimado e outras informações (com tratamento para valores nulos)
         try:
-            data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
-            ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
-        except:
-            ficha['dataDeCompra_br'] = ficha['dataDeCompra']
-    ficha['bairro_nome'] = BAIRROS.get(int(ficha.get('bairro', 0)), "Bairro não encontrado")
-    ficha['estado'] = json.loads(ficha.get('estado_json', '[]'))
-    cursor.close()
-    conn.close()
-    return render_template('detalhes_ficha.html', ficha=ficha)
+            valor_estimado = float(ficha.get('valor', '0'))
+        except (ValueError, TypeError):
+            valor_estimado = 0.0
+        valor_estimado = valor_estimado * 1.05
+        # Adiciona os valores calculados à ficha
+        ficha['valorEstimado'] = float(valor_estimado)
+        ficha['demandaMedia'] = float(valor_estimado * 1.05)  # +5%
+        ficha['demandaAlta'] = float(valor_estimado * 1.10)  # +10%
+        # Formatar data de compra para o formato brasileiro
+        if ficha.get('dataDeCompra'):
+            try:
+                # Tenta parsear a data para formato brasileiro
+                data_obj = datetime.strptime(ficha['dataDeCompra'], '%Y-%m-%d')
+                ficha['dataDeCompra_br'] = data_obj.strftime('%d/%m/%Y')
+            except ValueError:
+                try:
+                    # Tenta parsear caso já esteja no formato DD/MM/YYYY
+                    datetime.strptime(ficha['dataDeCompra'], '%d/%m/%Y')
+                    ficha['dataDeCompra_br'] = ficha['dataDeCompra']
+                except ValueError:
+                    ficha['dataDeCompra_br'] = ficha['dataDeCompra']
+        else:
+            ficha['dataDeCompra_br'] = None
+        # Garantir valores padrão para dimensões
+        ficha['altura'] = ficha.get('altura', '0')
+        ficha['largura'] = ficha.get('largura', '0')
+        ficha['profundidade'] = ficha.get('profundidade', '0')
+        cursor.close()
+        conn.close()
+        return render_template('detalhes_ficha.html', ficha=ficha)
+    except Exception as e:
+        print(f"\nERRO GRAVE: {str(e)}")
+        return render_template('erro.html', mensagem="Ocorreu um erro ao processar a ficha"), 500
 
-@app.route('/nova_ficha')
-@login_required
-def nova_ficha():
-    return render_template('nova_ficha.html', bairros=BAIRROS)
-
-@app.route('/preview_ficha', methods=['POST'])
-@login_required
-def preview_ficha():
-    form_data = {
-        'nome': request.form.get('nome', ''),
-        'cpf': request.form.get('cpf', ''),
-        'telefone': request.form.get('telefone', ''),
-        'email': request.form.get('email', ''),
-        'produto': request.form.get('produto', ''),
-        'marca': request.form.get('marca', ''),
-        'quantidade': request.form.get('quantidade', '1'),
-        'data_compra': request.form.get('data_compra', ''),
-        'valor': request.form.get('valor_unitario', '0'),
-        'marcaUso': request.form.get('marcas_uso', ''),
-        'descricao': request.form.get('descricao', ''),
-        'altura': request.form.get('altura', '0'),
-        'largura': request.form.get('largura', '0'),
-        'profundidade': request.form.get('profundidade', '0'),
-        'bairro': int(request.form.get('bairro', 0)),
-        'outroBairro': request.form.get('outro_bairro', ''),
-        'voltagem': request.form.get('voltagem', ''),
-        'precisa_limpeza': request.form.get('precisa_limpeza', 'não'),
-        'precisa_desmontagem': request.form.get('precisa_desmontagem', 'não'),
-        'possui_nota_fiscal': request.form.get('possui_nota_fiscal', 'não'),
-        'aceita_credito': request.form.get('aceita_credito', 'não'),
-        'tipo_reparo': request.form.get('tipo_reparo', 'nenhum'),
-        'estado': request.form.getlist('estado[]'),
-        'imagem_url': None,
-        'produtos_similares': []
-    }
-    if 'imagem' in request.files and request.files['imagem'].filename != '':
-        imagem = request.files['imagem']
-        img = Image.open(imagem)
-        form_data['imagem_url'] = finder._convert_image_to_url(image=img)
-        if form_data['imagem_url']:
-            form_data['produtos_similares'] = finder.buscar_produtos_por_url(form_data['imagem_url'])
-    form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
-    if form_data['data_compra']:
-        try:
-            data_obj = datetime.strptime(form_data['data_compra'], '%Y-%m-%d')
-            form_data['data_compra_br'] = data_obj.strftime('%d/%m/%Y')
-        except:
-            form_data['data_compra_br'] = form_data['data_compra']
-    else:
-        form_data['data_compra_br'] = ''
-    form_data = finder.calcular_valores_estimados(form_data)
-    return render_template('preview_ficha.html', ficha=form_data)
-
-@app.route('/cadastrar_ficha', methods=['POST'])
-@login_required
-def cadastrar_ficha():
-    conn = get_db_connection()
-    if not conn:
-        return "Erro ao conectar ao banco de dados", 500
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(entry_id) FROM frmt_form_entry_meta")
-    entry_id = (cursor.fetchone()[0] or 0) + 1
-    meta_data = [
-        ('name-1', request.form.get('nome', '')),
-        ('cpf-1', request.form.get('cpf', '')),
-        ('phone-1', request.form.get('telefone', '')),
-        ('email-1', request.form.get('email', '')),
-        ('produto-1', request.form.get('produto', '')),
-        ('marca-1', request.form.get('marca', '')),
-        ('quantidade-1', request.form.get('quantidade', '')),
-        ('text-4', request.form.get('data_compra', '')),
-        ('currency-1', request.form.get('valor_unitario', '')),
-        ('text-2', request.form.get('marcas_uso', '')),
-        ('text-1', request.form.get('descricao', '')),
-        ('number-1', request.form.get('altura', '')),
-        ('number-2', request.form.get('largura', '')),
-        ('number-3', request.form.get('profundidade', '')),
-        ('bairro-1', request.form.get('bairro', '')),
-        ('outro_bairro-1', request.form.get('outro_bairro', '')),
-        ('voltagem-1', request.form.get('voltagem', '')),
-        ('precisa_limpeza-1', request.form.get('precisa_limpeza', '')),
-        ('precisa_desmontagem-1', request.form.get('precisa_desmontagem', '')),
-        ('possui_nota_fiscal-1', request.form.get('possui_nota_fiscal', '')),
-        ('aceita_credito-1', request.form.get('aceita_credito', '')),
-        ('tipo_reparo-1', request.form.get('tipo_reparo', '')),
-        ('estado-1', json.dumps(request.form.getlist('estado[]'))),
-        ('radio-3', 'Pendente'),
-    ]
-    if request.form.get('imagem_url'):
-        arquivo_data = phpserialize.dumps({'file': {'file_url': [request.form.get('imagem_url')]}})
-        meta_data.append(('upload-1', arquivo_data.decode('utf-8')))
-    for key, value in meta_data:
-        cursor.execute("INSERT INTO frmt_form_entry_meta (entry_id, meta_key, meta_value) VALUES (%s, %s, %s)", (entry_id, key, value))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return redirect(url_for('lista_fichas'))
 
 @app.route('/atualizar_status/<int:id>', methods=['POST'])
 @login_required
 def atualizar_status(id):
+    """Rota para atualizar o status de uma ficha"""
     novo_status = request.form['status']
-    conn = get_db_connection()
-    if not conn:
-        return "Erro ao conectar ao banco de dados", 500
-    cursor = conn.cursor()
-    cursor.execute("UPDATE frmt_form_entry_meta SET meta_value = %s WHERE entry_id = %s AND meta_key = 'radio-3'", (novo_status, id))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return redirect(url_for('detalhes_ficha', id=id))
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
+        cursor = conn.cursor()
+        # Atualizar o status na tabela
+        sql = """
+        UPDATE frmt_form_entry_meta
+        SET meta_value = %s
+        WHERE entry_id = %s AND meta_key = 'radio-3'
+        """
+        cursor.execute(sql, (novo_status, id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('detalhes_ficha', id=id))
+    except Exception as e:
+        logger.error(f"Erro ao atualizar status: {str(e)}")
+        return f"Erro ao processar a solicitação: {str(e)}", 500
+
+
+@app.route('/test-db')
+def test_db():
+    """Rota para testar a conexão com o banco de dados"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return {
+                'status': 'success',
+                'message': 'Conexão com banco de dados estabelecida',
+                'config': {
+                    'host': DB_CONFIG['host'],
+                    'port': DB_CONFIG['port'],
+                    'database': DB_CONFIG['database']
+                }
+            }
+        else:
+            return {
+                'status': 'error',
+                'message': 'Não foi possível estabelecer conexão com o banco de dados',
+                'config': {
+                    'host': DB_CONFIG['host'],
+                    'port': DB_CONFIG['port'],
+                    'database': DB_CONFIG['database']
+                }
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e),
+            'config': {
+                'host': DB_CONFIG['host'],
+                'port': DB_CONFIG['port'],
+                'database': DB_CONFIG['database']
+            }
+        }
+
+
+@app.route('/nova_ficha')
+@login_required
+def nova_ficha():
+    """Exibe o formulário para cadastrar uma nova ficha"""
+    return render_template('nova_ficha.html', bairros=BAIRROS)
+
+
+@app.route('/preview_ficha', methods=['POST'])
+@login_required
+def preview_ficha():
+    """Rota para visualizar os dados do formulário antes de cadastrar"""
+    try:
+        # Coleta dos dados do formulário - ADAPTADO PARA O TEMPLATE
+        form_data = {
+            'nome': request.form.get('nome', ''),
+            'cpf': request.form.get('cpf', ''),
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', ''),
+            'produto': request.form.get('produto', ''),
+            'marca': request.form.get('marca', ''),
+            'quantidade': float(request.form.get('quantidade', 1)),
+            'data_compra': request.form.get('data_compra', ''),
+            'valor': float(request.form.get('valor_unitario', 0)),
+            'marcaUso': request.form.get('marcas_uso', ''),
+            'descricao': request.form.get('descricao', ''),
+            'altura': float(request.form.get('altura', 0)),
+            'largura': float(request.form.get('largura', 0)),
+            'profundidade': float(request.form.get('profundidade', 0)),
+            'bairro': int(request.form.get('bairro', 0)),
+            'outroBairro': request.form.get('outro_bairro', ''),
+            'voltagem': request.form.get('voltagem', ''),
+            'precisa_limpeza': request.form.get('precisa_limpeza', 'não'),
+            'precisa_desmontagem': request.form.get('precisa_desmontagem', 'não'),
+            'possui_nota_fiscal': request.form.get('possui_nota_fiscal', 'não'),
+            'aceita_credito': request.form.get('aceita_credito', 'não'),
+            'tipo_reparo': request.form.get('tipo_reparo', 'nenhum'),
+            'estado': request.form.getlist('estado[]'),
+            'imagem_url': None,
+            'produtos_similares': []
+        }
+        # Processar imagem
+        if 'imagem' in request.files:
+            imagem = request.files['imagem']
+            if imagem.filename != '':
+                try:
+                    img = Image.open(imagem)
+                    img_url = finder._convert_image_to_url(image=img)
+                    form_data['imagem_url'] = img_url
+                    # Buscar produtos similares
+                    if img_url:
+                        form_data['produtos_similares'] = finder.buscar_produtos_por_url(img_url)
+                except Exception as e:
+                    logger.error(f"Erro ao processar imagem: {str(e)}")
+                    form_data['erro_imagem'] = str(e)
+        # Converter bairro ID para nome
+        form_data['bairro_nome'] = BAIRROS.get(form_data['bairro'], "Bairro não encontrado")
+        # Formatar data
+        if form_data['data_compra']:
+            try:
+                data_obj = datetime.strptime(form_data['data_compra'], '%Y-%m-%d')
+                form_data['data_compra_br'] = data_obj.strftime('%d/%m/%Y')
+            except ValueError:
+                form_data['data_compra_br'] = form_data['data_compra']
+        else:
+            form_data['data_compra_br'] = "Não informada"
+        # Calcular valores estimados com base nos itens similares
+        form_data = finder.calcular_valores_estimados(form_data)
+        return render_template('preview_ficha.html', ficha=form_data)
+    except Exception as e:
+        logger.error(f"Erro ao processar pré-visualização: {str(e)}")
+        return render_template('erro.html', mensagem="Ocorreu um erro ao processar a pré-visualização"), 500
+
+
+@app.route('/cadastrar_ficha', methods=['POST'])
+@login_required
+def cadastrar_ficha():
+    """Rota para cadastrar a ficha após a pré-visualização"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return "Erro ao conectar ao banco de dados", 500
+        cursor = conn.cursor()
+        # Obter novo entry_id
+        cursor.execute("SELECT MAX(entry_id) FROM frmt_form_entry_meta")
+        max_id = cursor.fetchone()[0] or 0
+        entry_id = max_id + 1
+
+        # Mapear fields para meta_keys da estrutura original
+        meta_data = [
+            ('name-1', request.form.get('nome', '')),
+            ('phone-1', request.form.get('telefone', '')),
+            ('email-1', request.form.get('email', '')),
+            ('text-1', request.form.get('descricao', '')),
+            ('text-3', request.form.get('localCompra', '')),
+            ('text-4', request.form.get('data_compra', '')),
+            ('currency-1', request.form.get('valor_unitario', '')),
+            ('text-2', request.form.get('marcas_uso', '')),
+            ('textarea-1', request.form.get('descricaoItem', '')),
+            ('number-1', request.form.get('altura', '')),
+            ('number-2', request.form.get('largura', '')),
+            ('number-3', request.form.get('profundidade', '')),
+            ('radio-1', request.form.get('troca', '')),
+            ('text-5', request.form.get('text5', '')),
+            ('radio-2', request.form.get('possui_nota_fiscal', '')),
+            ('radio-3', 'Pendente')
+        ]
+
+        # Adicionar campos específicos do novo formulário
+        meta_data.extend([
+            ('produto-1', request.form.get('produto', '')),
+            ('marca-1', request.form.get('marca', '')),
+            ('quantidade-1', request.form.get('quantidade', '')),
+            ('bairro-1', request.form.get('bairro', '')),
+            ('outro_bairro-1', request.form.get('outro_bairro', '')),
+            ('voltagem-1', request.form.get('voltagem', '')),
+            ('precisa_limpeza-1', request.form.get('precisa_limpeza', '')),
+            ('precisa_desmontagem-1', request.form.get('precisa_desmontagem', '')),
+            ('aceita_credito-1', request.form.get('aceita_credito', '')),
+            ('tipo_reparo-1', request.form.get('tipo_reparo', '')),
+            ('estado-1', json.dumps(request.form.getlist('estado[]')))
+        ])
+
+        # Para arquivo, serializar como phpserialize
+        if request.form.get('imagem_url'):
+            arquivo_data = phpserialize.dumps({'file': {'file_url': [request.form.get('imagem_url')]}})
+            meta_data.append(('upload-1', arquivo_data.decode('utf-8')))
+
+        # Inserir no banco
+        for meta_key, meta_value in meta_data:
+            cursor.execute(
+                "INSERT INTO frmt_form_entry_meta (entry_id, meta_key, meta_value) VALUES (%s, %s, %s)",
+                (entry_id, meta_key, meta_value)
+            )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('lista_fichas'))
+    except Exception as e:
+        logger.error(f"Erro ao cadastrar ficha: {str(e)}")
+        return render_template('erro.html', mensagem="Ocorreu um erro ao cadastrar a ficha"), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
