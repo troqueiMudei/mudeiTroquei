@@ -749,7 +749,7 @@ class ProdutoFinder:
                                 const priceText = priceEl.innerText.trim();
                                 if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
                                     price = priceText;
-                                    break;
+                                    break
                                 }
                             }
                         }
@@ -802,10 +802,10 @@ class ProdutoFinder:
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--window-size=1280,720")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
+        # chrome_options.add_argument("--headless")  # Descomente para rodar sem UI
         try:
             self.driver = webdriver.Chrome(
-                service=Service(executable_path='/usr/bin/chromedriver'),
+                service=Service(ChromeDriverManager().install()),
                 options=chrome_options
             )
             return True
@@ -1322,8 +1322,8 @@ class ProdutoFinder:
                 text = el.text.strip()
                 if text:
                     return text
-            except:
-                continue
+                except:
+                    continue
         return None
 
     def _extract_attribute(self, element, attr, selectors):
