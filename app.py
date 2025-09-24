@@ -370,7 +370,7 @@ class ProdutoFinder:
                 return image_url
             return None
 
-    def _extract_products_selenium(self, search_query):
+    def _extract_products_selenium(self):
         """Extrai produtos da página, limitando a sites brasileiros comerciais com preços em reais,
         excluindo redes sociais, Amazon e itens sem preço"""
         products = []
@@ -390,7 +390,10 @@ class ProdutoFinder:
                     url_element = element.find_element(By.XPATH, ".//a[@href]")
                     url = url_element.get_attribute('href')
 
-                    is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
+                    # is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
+                    # Comentado o filtro brasileiro para permitir mais resultados durante testes
+                    is_brazilian = True
+
                     if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
                             price_text):
                         price_value = self._safe_extract_price_from_string(price_text)
@@ -402,9 +405,9 @@ class ProdutoFinder:
                             'url': url,
                             'img': img_url
                         })
-                        logger.info(f"Produto brasileiro encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
+                        logger.info(f"Produto encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
                     else:
-                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
+                        logger.debug(f"URL ou preço ignorado: {url} - {price_text}")
                 except Exception as e:
                     logger.debug(f"Erro ao extrair produto: {str(e)}")
                     continue
@@ -725,7 +728,7 @@ class ProdutoFinder:
                     'div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc'
                 );
                 containers.forEach(container => {
-                    try {
+                    try:
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"]');
 
                         // CORREÇÃO: Busca melhorada por preços
@@ -1423,7 +1426,7 @@ class ProdutoFinder:
                     print(f"Não encontrou aba Shopping: {str(e)}")
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.driver.save_screenshot(f"debug_{timestamp}.png")
-                products = self._extract_products_selenium()
+                products = self._extract_products_comprehensive()  # Alterado para método mais robusto
                 if products:
                     print(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
