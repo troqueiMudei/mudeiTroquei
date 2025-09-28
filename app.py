@@ -391,7 +391,16 @@ class ProdutoFinder:
         try:
             encoded_url = quote(image_url, safe=':/?=&')
             search_url = f"{self.base_url}{encoded_url}"
-            return self._executar_busca(search_url)
+            products = self._executar_busca(search_url)
+            # Forçar pelo menos 3 itens
+            retries = 0
+            while len(products) < 3 and retries < 3:
+                retries += 1
+                logger.info(f"Produtos encontrados: {len(products)}. Tentando novamente para alcançar pelo menos 3...")
+                time.sleep(5)  # Espera antes de tentar novamente
+                products += self._executar_busca(search_url)  # Tenta novamente
+                products = list({p['url']: p for p in products}.values())  # Remove duplicados
+            return products[:5]  # Limita a 5, mas garante pelo menos 3 se possível
         except Exception as e:
             logger.error(f"Erro durante a busca: {str(e)}")
             return []
