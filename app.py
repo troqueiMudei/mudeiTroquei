@@ -383,8 +383,27 @@ class ProdutoFinder:
                     self._initialize_driver()
         return products
 
-    def buscar_produtos_por_url(self, image_url):
-        """Busca produtos similares por URL de imagem"""
+    def _search_by_text(self, query):
+        """Fallback para busca por texto no Google Shopping"""
+        if not self._initialize_driver():
+            return []
+        try:
+            shopping_url = f"https://www.google.com/search?q={quote(query)}&tbm=shop&gl=br&hl=pt-BR"
+            self.driver.get(shopping_url)
+            time.sleep(5)
+            # Rolagens múltiplas para carregar mais itens
+            for _ in range(3):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+            return self._extract_products_comprehensive()
+        except Exception as e:
+            logger.error(f"Erro na busca por texto: {str(e)}")
+            return []
+        finally:
+            self.cleanup()
+
+    def buscar_produtos_por_url(self, image_url, fallback_query=None):
+        """Busca produtos similares por URL de imagem com fallback"""
         logger.info(f"Iniciando busca para imagem: {image_url}")
         if not self._initialize_driver():
             return []
@@ -400,7 +419,13 @@ class ProdutoFinder:
                 time.sleep(5)  # Espera antes de tentar novamente
                 products += self._executar_busca(search_url)  # Tenta novamente
                 products = list({p['url']: p for p in products}.values())  # Remove duplicados
-            return products[:5]  # Limita a 5, mas garante pelo menos 3 se possível
+            # Se ainda menos que 3, usar fallback por texto se query fornecido
+            if len(products) < 3 and fallback_query:
+                logger.info("Usando fallback de busca por texto...")
+                text_products = self._search_by_text(fallback_query)
+                products += text_products
+                products = list({p['url']: p for p in products}.values())[:5]
+            return products
         except Exception as e:
             logger.error(f"Erro durante a busca: {str(e)}")
             return []
@@ -548,7 +573,8 @@ def preview_ficha():
                 img_url = finder._convert_image_to_url(image=img)
                 form_data['imagem_url'] = img_url
                 if img_url:
-                    produtos = finder.buscar_produtos_por_url(img_url)
+                    fallback_query = form_data['produto'] + " " + form_data['descricao']
+                    produtos = finder.buscar_produtos_por_url(img_url, fallback_query=fallback_query)
                     form_data['produtos_similares'] = produtos or []
                     logger.info(f"Encontrados {len(produtos)} produtos similares")
             except Exception as e:
