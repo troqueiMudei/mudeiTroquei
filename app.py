@@ -93,7 +93,7 @@ app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
-        self.base_url = "https://lens.google.com/uploadbyurl?url="
+        self.base_url = "https://www.google.com/searchbyimage?site=search&image_url="
         self.max_retries = 3
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -383,25 +383,6 @@ class ProdutoFinder:
                     self._initialize_driver()
         return products
 
-    def _search_by_text(self, query):
-        """Fallback para busca por texto no Google Shopping"""
-        if not self._initialize_driver():
-            return []
-        try:
-            shopping_url = f"https://www.google.com/search?q={quote(query)}&tbm=shop&gl=br&hl=pt-BR"
-            self.driver.get(shopping_url)
-            time.sleep(5)
-            # Rolagens múltiplas para carregar mais itens
-            for _ in range(3):
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
-            return self._extract_products_comprehensive()
-        except Exception as e:
-            logger.error(f"Erro na busca por texto: {str(e)}")
-            return []
-        finally:
-            self.cleanup()
-
     def buscar_produtos_por_url(self, image_url, fallback_query=None):
         """Busca produtos similares por URL de imagem com fallback"""
         logger.info(f"Iniciando busca para imagem: {image_url}")
@@ -409,7 +390,7 @@ class ProdutoFinder:
             return []
         try:
             encoded_url = quote(image_url, safe=':/?=&')
-            search_url = f"{self.base_url}{encoded_url}"
+            search_url = f"{self.base_url}{encoded_url}&tbm=shop"
             products = self._executar_busca(search_url)
             # Forçar pelo menos 3 itens
             retries = 0
