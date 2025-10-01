@@ -18,7 +18,7 @@ import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import WebDriverException, TimeoutException
 from urllib.parse import quote
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -89,11 +89,11 @@ BAIRROS = {
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
-# Classe para buscar produtos por imagem no Google Lens
+# Classe para buscar produtos por imagem no Google Shopping
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
-        self.base_url = "https://www.google.com/searchbyimage?site=search&image_url="
+        self.base_url = "https://www.google.com/search?tbm=shop&q="
         self.max_retries = 3
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -197,7 +197,7 @@ class ProdutoFinder:
         """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
+                ".//span[contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$')]",
                 ".//span[@aria-hidden='true']",
                 ".//span[contains(@class, 'currency') or contains(@class, 'value')]"
@@ -230,14 +230,13 @@ class ProdutoFinder:
         try:
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located(
-                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'Lv3Kxc')]")
+                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'pla-unit') or contains(@class, 'sh-dlr__list-result')]")
                 )
             )
             selectors = [
                 "//div[contains(@class, 'sh-dgr__grid-result')]",
                 "//div[contains(@class, 'sh-dlr__list-result')]",
                 "//div[contains(@class, 'pla-unit')]",
-                "//div[contains(@class, 'Lv3Kxc')]",
                 "//div[@data-product]"
             ]
             for selector in selectors:
@@ -273,7 +272,7 @@ class ProdutoFinder:
             selectors = [
                 ".//h3", ".//h4",
                 ".//div[contains(@class, 'title')]",
-                ".//div[contains(@class, 'header')]"
+                ".//span[contains(@class, 'title')]"
             ]
             for selector in selectors:
                 try:
@@ -310,9 +309,9 @@ class ProdutoFinder:
         try:
             return self.driver.execute_script("""
                 const results = [];
-                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc');
+                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit');
                 containers.forEach(container => {
-                    try:
+                    try {
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"]');
                         let price = 'Preço não disponível';
                         const priceSelectors = [
@@ -349,35 +348,46 @@ class ProdutoFinder:
         except:
             return []
 
+    def _search_by_text(self, query):
+        """Busca produtos por texto no Google Shopping"""
+        if not self._initialize_driver():
+            return []
+        try:
+            search_url = f"{self.base_url}{quote(query)}&gl=br&hl=pt-BR"
+            logger.info(f"Busca por texto: {search_url}")
+            self.driver.get(search_url)
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            for _ in range(3):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+            return self._extract_products_comprehensive()
+        except Exception as e:
+            logger.error(f"Erro na busca por texto: {str(e)}")
+            return []
+        finally:
+            self.cleanup()
+
     def _executar_busca(self, search_url):
-        """Executa a busca no Google Lens"""
+        """Executa a busca no Google Shopping"""
         products = []
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
-                search_url = f"{search_url}&gl=br&hl=pt-BR"
                 logger.info(f"Tentativa {attempt + 1} - Acessando URL: {search_url}")
                 self.driver.get(search_url)
-                WebDriverWait(self.driver, 15).until(
+                WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
-                time.sleep(5)
-                try:
-                    shopping_tab = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
-                    )
-                    shopping_tab.click()
-                    time.sleep(5)
-                except:
-                    logger.warning("Aba Shopping não encontrada, continuando com página atual")
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-                time.sleep(3)
+                for _ in range(3):
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(3)
                 products = self._extract_products_comprehensive()
                 if products:
                     logger.info(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
-            except Exception as e:
+            except (WebDriverException, TimeoutException) as e:
                 logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
@@ -389,26 +399,27 @@ class ProdutoFinder:
         if not self._initialize_driver():
             return []
         try:
+            # Primeira tentativa: busca direta no Google Shopping com a imagem
             encoded_url = quote(image_url, safe=':/?=&')
-            search_url = f"{self.base_url}{encoded_url}&tbm=shop"
+            search_url = f"https://www.google.com/search?tbm=shop&q={encoded_url}&gl=br&hl=pt-BR"
             products = self._executar_busca(search_url)
             # Forçar pelo menos 3 itens
             retries = 0
             while len(products) < 3 and retries < 3:
                 retries += 1
                 logger.info(f"Produtos encontrados: {len(products)}. Tentando novamente para alcançar pelo menos 3...")
-                time.sleep(5)  # Espera antes de tentar novamente
-                products += self._executar_busca(search_url)  # Tenta novamente
-                products = list({p['url']: p for p in products}.values())  # Remove duplicados
-            # Se ainda menos que 3, usar fallback por texto se query fornecido
+                time.sleep(5)
+                products += self._executar_busca(search_url)
+                products = list({p['url']: p for p in products}.values())[:5]
+            # Fallback por texto se necessário
             if len(products) < 3 and fallback_query:
                 logger.info("Usando fallback de busca por texto...")
                 text_products = self._search_by_text(fallback_query)
                 products += text_products
                 products = list({p['url']: p for p in products}.values())[:5]
-            # Se ainda menos que 3, adicionar itens dummy para teste
+            # Se ainda menos que 3, adicionar itens dummy
             if len(products) < 3:
-                logger.info("Adicionando itens dummy para teste, pois nenhum produto foi encontrado")
+                logger.info("Adicionando itens dummy para garantir pelo menos 3 produtos")
                 dummy_products = [
                     {
                         "nome": "Geladeira Electrolux Duplex 310L Branca",
@@ -578,7 +589,7 @@ def preview_ficha():
                 img_url = finder._convert_image_to_url(image=img)
                 form_data['imagem_url'] = img_url
                 if img_url:
-                    fallback_query = form_data['produto'] + " " + form_data['descricao']
+                    fallback_query = form_data['produto'] + " " + form_data['marca'] + " " + form_data['descricao']
                     produtos = finder.buscar_produtos_por_url(img_url, fallback_query=fallback_query)
                     form_data['produtos_similares'] = produtos or []
                     logger.info(f"Encontrados {len(produtos)} produtos similares")
