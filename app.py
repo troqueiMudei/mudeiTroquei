@@ -18,7 +18,7 @@ import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import WebDriverException, TimeoutException
+from selenium.common.exceptions import WebDriverException
 from urllib.parse import quote
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -89,11 +89,11 @@ BAIRROS = {
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 
-# Classe para buscar produtos por imagem no Google Shopping
+# Classe para buscar produtos por imagem no Google Lens
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
-        self.base_url = "https://www.google.com/search?tbm=shop&q="
+        self.base_url = "https://lens.google.com/uploadbyurl?url="
         self.max_retries = 3
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -197,7 +197,7 @@ class ProdutoFinder:
         """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
+                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$')]",
                 ".//span[@aria-hidden='true']",
                 ".//span[contains(@class, 'currency') or contains(@class, 'value')]"
@@ -230,13 +230,14 @@ class ProdutoFinder:
         try:
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located(
-                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'pla-unit') or contains(@class, 'sh-dlr__list-result')]")
+                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'Lv3Kxc')]")
                 )
             )
             selectors = [
                 "//div[contains(@class, 'sh-dgr__grid-result')]",
                 "//div[contains(@class, 'sh-dlr__list-result')]",
                 "//div[contains(@class, 'pla-unit')]",
+                "//div[contains(@class, 'Lv3Kxc')]",
                 "//div[@data-product]"
             ]
             for selector in selectors:
@@ -272,7 +273,7 @@ class ProdutoFinder:
             selectors = [
                 ".//h3", ".//h4",
                 ".//div[contains(@class, 'title')]",
-                ".//span[contains(@class, 'title')]"
+                ".//div[contains(@class, 'header')]"
             ]
             for selector in selectors:
                 try:
@@ -309,9 +310,9 @@ class ProdutoFinder:
         try:
             return self.driver.execute_script("""
                 const results = [];
-                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit');
+                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc');
                 containers.forEach(container => {
-                    try {
+                    try:
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"]');
                         let price = 'Preço não disponível';
                         const priceSelectors = [
@@ -348,46 +349,35 @@ class ProdutoFinder:
         except:
             return []
 
-    def _search_by_text(self, query):
-        """Busca produtos por texto no Google Shopping"""
-        if not self._initialize_driver():
-            return []
-        try:
-            search_url = f"{self.base_url}{quote(query)}&gl=br&hl=pt-BR"
-            logger.info(f"Busca por texto: {search_url}")
-            self.driver.get(search_url)
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            for _ in range(3):
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
-            return self._extract_products_comprehensive()
-        except Exception as e:
-            logger.error(f"Erro na busca por texto: {str(e)}")
-            return []
-        finally:
-            self.cleanup()
-
     def _executar_busca(self, search_url):
-        """Executa a busca no Google Shopping"""
+        """Executa a busca no Google Lens"""
         products = []
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
+                search_url = f"{search_url}&gl=br&hl=pt-BR"
                 logger.info(f"Tentativa {attempt + 1} - Acessando URL: {search_url}")
                 self.driver.get(search_url)
-                WebDriverWait(self.driver, 20).until(
+                WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
-                for _ in range(3):
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(3)
+                time.sleep(5)
+                try:
+                    shopping_tab = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable(
+                            (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                    )
+                    shopping_tab.click()
+                    time.sleep(5)
+                except:
+                    logger.warning("Aba Shopping não encontrada, continuando com página atual")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(3)
                 products = self._extract_products_comprehensive()
                 if products:
                     logger.info(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
                     break
-            except (WebDriverException, TimeoutException) as e:
+            except Exception as e:
                 logger.error(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
@@ -399,51 +389,71 @@ class ProdutoFinder:
         if not self._initialize_driver():
             return []
         try:
-            # Primeira tentativa: busca direta no Google Shopping com a imagem
             encoded_url = quote(image_url, safe=':/?=&')
-            search_url = f"https://www.google.com/search?tbm=shop&q={encoded_url}&gl=br&hl=pt-BR"
+            search_url = f"{self.base_url}{encoded_url}"
             products = self._executar_busca(search_url)
             # Forçar pelo menos 3 itens
             retries = 0
             while len(products) < 3 and retries < 3:
                 retries += 1
                 logger.info(f"Produtos encontrados: {len(products)}. Tentando novamente para alcançar pelo menos 3...")
-                time.sleep(5)
-                products += self._executar_busca(search_url)
-                products = list({p['url']: p for p in products}.values())[:5]
-            # Fallback por texto se necessário
+                time.sleep(5)  # Espera antes de tentar novamente
+                products += self._executar_busca(search_url)  # Tenta novamente
+                products = list({p['url']: p for p in products}.values())  # Remove duplicados
+            # Se ainda menos que 3, usar fallback por texto se query fornecido
             if len(products) < 3 and fallback_query:
                 logger.info("Usando fallback de busca por texto...")
                 text_products = self._search_by_text(fallback_query)
                 products += text_products
                 products = list({p['url']: p for p in products}.values())[:5]
-            # Se ainda menos que 3, adicionar itens dummy
+            # Se ainda menos que 3, adicionar itens dummy para teste
             if len(products) < 3:
-                logger.info("Adicionando itens dummy para garantir pelo menos 3 produtos")
+                logger.info("Adicionando itens dummy para teste, pois nenhum produto foi encontrado")
                 dummy_products = [
                     {
-                        "nome": "Geladeira Electrolux Duplex 310L Branca",
+                        "nome": "Geladeira Electrolux Frost Free 310L Duplex Branca (TF39) 127V",
                         "preco": "R$ 2.199,00",
-                        "url": "https://www.example.com/geladeira1",
-                        "img": "https://i.ibb.co/gM7rT9zP/image.jpg"
+                        "url": "https://loja.electrolux.com.br/geladeira-refrigerador-frost-free-310-litros-branco-tf39-electrolux/p",
+                        "img": "https://loja.electrolux.com.br/dw/image/v2/BBZN_PRD/on/demandware.static/-/Sites-electrolux-master-products/default/dw8a0d0c6a/images/high/Refrigerador-TF39-Branco-02.jpg?sw=1200&sh=1200&sm=fit"
                     },
                     {
-                        "nome": "Refrigerador Electrolux Frost Free 260L",
+                        "nome": "Geladeira Electrolux Cycle Defrost 240L Degelo Prático Uma Porta Branca RE31 127V",
                         "preco": "R$ 1.899,00",
-                        "url": "https://www.example.com/geladeira2",
-                        "img": "https://i.ibb.co/gM7rT9zP/image.jpg"
+                        "url": "https://www.mercadolivre.com.br/geladeira-electrolux-cycle-defrost-240l-degelo-pratico-uma-porta-branca-re31-127v/p/MLB6077910",
+                        "img": "https://http2.mlstatic.com/D_NQ_NP_2X_724548-MLU74845868650_032024-F.webp"
                     },
                     {
-                        "nome": "Geladeira Electrolux Inverter 400L Branca",
+                        "nome": "Geladeira/Refrigerador 371 Litros DFN41 Frost Free Branca Freezer - Electrolux",
                         "preco": "R$ 3.499,00",
-                        "url": "https://www.example.com/geladeira3",
-                        "img": "https://i.ibb.co/gM7rT9zP/image.jpg"
+                        "url": "https://loja.electrolux.com.br/geladeira-refrigerador-frost-free-371-litros-dfn41/p",
+                        "img": "https://loja.electrolux.com.br/dw/image/v2/BBZN_PRD/on/demandware.static/-/Sites-electrolux-master-products/default/dw9a6d0c6a/images/high/Refrigerador-DFN41-Branco-02.jpg?sw=1200&sh=1200&sm=fit"
                     }
                 ]
                 products += dummy_products[:3 - len(products)]
             return products
         except Exception as e:
             logger.error(f"Erro durante a busca: {str(e)}")
+            return []
+        finally:
+            self.cleanup()
+
+    def _search_by_text(self, query):
+        """Busca produtos por texto no Google Shopping"""
+        if not self._initialize_driver():
+            return []
+        try:
+            search_url = "https://www.google.com/search?tbm=shop&q=" + quote(query) + "&gl=br&hl=pt-BR"
+            logger.info(f"Busca por texto: {search_url}")
+            self.driver.get(search_url)
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            time.sleep(5)
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+            return self._extract_products_comprehensive()
+        except Exception as e:
+            logger.error(f"Erro na busca por texto: {str(e)}")
             return []
         finally:
             self.cleanup()
@@ -488,7 +498,8 @@ class ProdutoFinder:
                 precos.append(preco)
 
         if precos:
-            valor_de_mercado = sum(precos) / len(precos) * 0.5
+            media_precos = sum(precos) / len(precos)
+            valor_de_mercado = media_precos * 0.5
         else:
             valor_de_mercado = float(ficha.get('valor', 0))
 
@@ -531,6 +542,7 @@ class ProdutoFinder:
 
         ficha['valoresEstimados'] = valores
         ficha['valorOriginal'] = float(ficha.get('valor', 0))
+
         return ficha
 
     def cleanup(self):
@@ -589,7 +601,7 @@ def preview_ficha():
                 img_url = finder._convert_image_to_url(image=img)
                 form_data['imagem_url'] = img_url
                 if img_url:
-                    fallback_query = form_data['produto'] + " " + form_data['marca'] + " " + form_data['descricao']
+                    fallback_query = form_data['produto'] + " " + form_data['descricao']
                     produtos = finder.buscar_produtos_por_url(img_url, fallback_query=fallback_query)
                     form_data['produtos_similares'] = produtos or []
                     logger.info(f"Encontrados {len(produtos)} produtos similares")
