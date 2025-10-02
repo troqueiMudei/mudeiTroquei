@@ -197,10 +197,12 @@ class ProdutoFinder:
         """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
-                ".//div[contains(@class, 'price') or contains(text(), 'R$')]",
-                ".//span[@aria-hidden='true']",
-                ".//span[contains(@class, 'currency') or contains(@class, 'value')]"
+                ".//span[contains(@class, 'a8Pemb')]",
+                ".//span[contains(@class, 'e10twf')]",
+                ".//span[contains(@class, 'T14wmb')]",
+                ".//span[contains(text(), 'R$')]",
+                ".//div[contains(@class, 'price')]",
+                ".//span[@aria-hidden='true']"
             ]
             for selector in price_selectors:
                 try:
@@ -411,22 +413,22 @@ class ProdutoFinder:
                 logger.info("Adicionando itens dummy para teste, pois nenhum produto foi encontrado")
                 dummy_products = [
                     {
-                        "nome": "Geladeira Electrolux Frost Free 310L Duplex Branca (TF39) 127V",
-                        "preco": "R$ 2.199,00",
-                        "url": "https://loja.electrolux.com.br/geladeira-refrigerador-frost-free-310-litros-branco-tf39-electrolux/p",
-                        "img": "https://loja.electrolux.com.br/dw/image/v2/BBZN_PRD/on/demandware.static/-/Sites-electrolux-master-products/default/dw8a0d0c6a/images/high/Refrigerador-TF39-Branco-02.jpg?sw=1200&sh=1200&sm=fit"
+                        "nome": "Armário Portas de MDF",
+                        "preco": "R$ 1.200,00",
+                        "url": "https://www.example.com/armario1",
+                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     },
                     {
-                        "nome": "Geladeira Electrolux Cycle Defrost 240L Degelo Prático Uma Porta Branca RE31 127V",
-                        "preco": "R$ 1.899,00",
-                        "url": "https://www.mercadolivre.com.br/geladeira-electrolux-cycle-defrost-240l-degelo-pratico-uma-porta-branca-re31-127v/p/MLB6077910",
-                        "img": "https://http2.mlstatic.com/D_NQ_NP_2X_724548-MLU74845868650_032024-F.webp"
+                        "nome": "Armário de Madeira Usado",
+                        "preco": "R$ 800,00",
+                        "url": "https://www.example.com/armario2",
+                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     },
                     {
-                        "nome": "Geladeira/Refrigerador 371 Litros DFN41 Frost Free Branca Freezer - Electrolux",
-                        "preco": "R$ 3.499,00",
-                        "url": "https://loja.electrolux.com.br/geladeira-refrigerador-frost-free-371-litros-dfn41/p",
-                        "img": "https://loja.electrolux.com.br/dw/image/v2/BBZN_PRD/on/demandware.static/-/Sites-electrolux-master-products/default/dw9a6d0c6a/images/high/Refrigerador-DFN41-Branco-02.jpg?sw=1200&sh=1200&sm=fit"
+                        "nome": "Armário para Sala",
+                        "preco": "R$ 1.500,00",
+                        "url": "https://www.example.com/armario3",
+                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     }
                 ]
                 products += dummy_products[:3 - len(products)]
