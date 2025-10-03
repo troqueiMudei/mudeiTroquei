@@ -197,12 +197,10 @@ class ProdutoFinder:
         """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'a8Pemb')]",
-                ".//span[contains(@class, 'e10twf')]",
-                ".//span[contains(@class, 'T14wmb')]",
-                ".//span[contains(text(), 'R$')]",
-                ".//div[contains(@class, 'price')]",
-                ".//span[@aria-hidden='true']"
+                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
+                ".//div[contains(@class, 'price') or contains(text(), 'R$')]",
+                ".//span[@aria-hidden='true']",
+                ".//span[contains(@class, 'currency') or contains(@class, 'value')]"
             ]
             for selector in price_selectors:
                 try:
@@ -413,20 +411,20 @@ class ProdutoFinder:
                 logger.info("Adicionando itens dummy para teste, pois nenhum produto foi encontrado")
                 dummy_products = [
                     {
-                        "nome": "Armário Portas de MDF",
-                        "preco": "R$ 1.200,00",
+                        "nome": "Armário de Madeira para Quarto",
+                        "preco": "R$ 1.500,00",
                         "url": "https://www.example.com/armario1",
                         "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     },
                     {
-                        "nome": "Armário de Madeira Usado",
-                        "preco": "R$ 800,00",
+                        "nome": "Armário Modulado MDF",
+                        "preco": "R$ 1.200,00",
                         "url": "https://www.example.com/armario2",
                         "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     },
                     {
-                        "nome": "Armário para Sala",
-                        "preco": "R$ 1.500,00",
+                        "nome": "Armário Usado em Bom Estado",
+                        "preco": "R$ 800,00",
                         "url": "https://www.example.com/armario3",
                         "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
                     }
