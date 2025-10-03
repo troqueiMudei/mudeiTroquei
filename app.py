@@ -197,32 +197,62 @@ class ProdutoFinder:
         """Extrai preço do elemento de forma robusta"""
         try:
             price_selectors = [
-                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$')]",
-                ".//div[contains(@class, 'price') or contains(text(), 'R$')]",
+                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
+                ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//span[@aria-hidden='true']",
-                ".//span[contains(@class, 'currency') or contains(@class, 'value')]"
+                ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
+                ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
+                ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
+                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
+
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
                     if price_text and self._is_valid_price_text(price_text):
+                        logger.info(f"Preço encontrado: {price_text} (seletor: {selector})")
                         return price_text
-                except:
+                except Exception as e:
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
                     continue
-            full_text = element.text
-            price_pattern = r'(?:R\$|\$)\s*[\d,.]+(?:[,.]\d{2})?'
-            matches = re.findall(price_pattern, full_text, re.IGNORECASE)
-            return matches[0] if matches else "Preço não disponível"
+
+            try:
+                full_text = element.text
+                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
+                matches = re.findall(price_pattern, full_text, re.IGNORECASE)
+                for match in matches:
+                    if self._is_valid_price_text(match):
+                        logger.info(f"Preço encontrado no texto completo: {match}")
+                        return match
+            except Exception as e:
+                logger.debug(f"Falha na busca por texto completo: {str(e)}")
+
+            logger.warning("Nenhum preço válido encontrado")
+            return "Preço não disponível"
         except Exception as e:
-            logger.debug(f"Erro na extração de preço: {str(e)}")
+            logger.error(f"Erro geral na extração de preço: {str(e)}")
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido"""
-        if not text:
+        """Verifica se o texto é um preço válido em reais (R$) ou dólares ($)"""
+        if not text or not isinstance(text, str):
             return False
-        return bool(re.match(r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?', text, re.IGNORECASE))
+
+        # Aceita preços com R$ ou $ (para conversão)
+        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
+            price_patterns = [
+                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
+                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
+                r'[\d]+(?:\s*(?:reais|BRL|dólares|USD))',
+                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+',
+                r'[\d,.]+(?:\s*(?:reais|dólares))?',
+            ]
+            for pattern in price_patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+        return False
 
     def _extract_products_comprehensive(self):
         """Método robusto para extrair produtos"""
@@ -365,7 +395,7 @@ class ProdutoFinder:
                 try:
                     shopping_tab = WebDriverWait(self.driver, 10).until(
                         EC.element_to_be_clickable(
-                            (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras')]"))
+                            (By.XPATH, "//*[contains(text(), 'Shopping') or contains(text(), 'Compras') or contains(text(), 'Produtos') or contains(text(), 'Product')]"))
                     )
                     shopping_tab.click()
                     time.sleep(5)
@@ -406,30 +436,6 @@ class ProdutoFinder:
                 text_products = self._search_by_text(fallback_query)
                 products += text_products
                 products = list({p['url']: p for p in products}.values())[:5]
-            # Se ainda menos que 3, adicionar itens dummy para teste
-            if len(products) < 3:
-                logger.info("Adicionando itens dummy para teste, pois nenhum produto foi encontrado")
-                dummy_products = [
-                    {
-                        "nome": "Armário de Madeira para Quarto",
-                        "preco": "R$ 1.500,00",
-                        "url": "https://www.example.com/armario1",
-                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
-                    },
-                    {
-                        "nome": "Armário Modulado MDF",
-                        "preco": "R$ 1.200,00",
-                        "url": "https://www.example.com/armario2",
-                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
-                    },
-                    {
-                        "nome": "Armário Usado em Bom Estado",
-                        "preco": "R$ 800,00",
-                        "url": "https://www.example.com/armario3",
-                        "img": "https://i.ibb.co/SXrpFcG5/image.jpg"
-                    }
-                ]
-                products += dummy_products[:3 - len(products)]
             return products
         except Exception as e:
             logger.error(f"Erro durante a busca: {str(e)}")
