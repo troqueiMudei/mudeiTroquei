@@ -12,7 +12,6 @@ from functools import wraps
 from PIL import Image, ImageEnhance, ImageFilter
 from flask import Flask, render_template, request, redirect, url_for, session
 from selenium import webdriver
-from selenium.common import TimeoutException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import time
@@ -94,7 +93,7 @@ app.secret_key = os.getenv('SECRET_KEY', 'chave_secreta_aqui')
 class ProdutoFinder:
     def __init__(self):
         self.driver = None
-        self.base_url = "https://www.google.com/searchbyimage?image_url="
+        self.base_url = "https://lens.google.com/uploadbyurl?url="
         self.max_retries = 3
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -210,7 +209,6 @@ class ProdutoFinder:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
                     if price_text and self._is_valid_price_text(price_text):
-                        logger.info(f"Preço encontrado: {price_text}")
                         return price_text
                 except:
                     continue
@@ -232,13 +230,9 @@ class ProdutoFinder:
         """Método robusto para extrair produtos"""
         produtos = []
         try:
-            # Espera por qualquer elemento de produto ou lista
             WebDriverWait(self.driver, 20).until(
-                EC.any_of(
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]")),
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'pla-unit')]")),
-                    EC.presence_of_element_located((By.XPATH, "//div[@role='listitem']")),
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'product')]"))
+                EC.presence_of_element_located(
+                    (By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'pla-unit') or contains(@class, 'sh-dlr__list-result')]")
                 )
             )
             selectors = [
@@ -247,13 +241,11 @@ class ProdutoFinder:
                 "//div[contains(@class, 'pla-unit')]",
                 "//div[contains(@class, 'Lv3Kxc')]",
                 "//div[@data-product]",
-                "//div[@role='listitem']",
-                "//a[contains(@href, '/shopping/')]"
+                "//div[@role='listitem']"
             ]
             for selector in selectors:
                 try:
                     elements = self.driver.find_elements(By.XPATH, selector)
-                    logger.info(f"Encontrados {len(elements)} elementos com seletor: {selector}")
                     if elements:
                         for element in elements[:5]:
                             try:
@@ -265,21 +257,15 @@ class ProdutoFinder:
                                 }
                                 if produto["nome"] and produto["url"] != "#":
                                     produtos.append(produto)
-                                    logger.info(f"Produto extraído: {produto['nome']} - {produto['preco']}")
-                            except Exception as e:
-                                logger.warning(f"Erro ao extrair produto individual: {str(e)}")
+                            except:
                                 continue
-                        if len(produtos) >= 3:
+                        if produtos:
                             break
-                except Exception as e:
-                    logger.warning(f"Erro com seletor {selector}: {str(e)}")
+                except:
                     continue
             if not produtos:
                 produtos = self._extract_with_javascript()
             return produtos[:5]
-        except TimeoutException:
-            logger.error("Timeout ao esperar por elementos de produto")
-            return self._extract_with_javascript()
         except Exception as e:
             logger.error(f"Erro na extração de produtos: {str(e)}")
             return self._extract_with_javascript()
@@ -290,24 +276,16 @@ class ProdutoFinder:
             selectors = [
                 ".//h3", ".//h4",
                 ".//div[contains(@class, 'title')]",
-                ".//div[contains(@class, 'header')]",
                 ".//span[contains(@class, 'title')]"
             ]
             for selector in selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
                     text = el.text.strip()
-                    if text and len(text) > 3:
+                    if text:
                         return text
                 except:
                     continue
-            # Fallback para qualquer texto visível
-            try:
-                text = element.text.strip()
-                if text and len(text) > 3:
-                    return text[:100]  # Limita a 100 chars
-            except:
-                pass
             return "Produto similar"
         except:
             return "Produto similar"
@@ -316,27 +294,19 @@ class ProdutoFinder:
         """Extrai URL do elemento de forma segura"""
         try:
             if element.tag_name == 'a':
-                href = element.get_attribute('href')
-                if href:
-                    return href
+                return element.get_attribute('href')
             link = element.find_element(By.XPATH, ".//a")
-            href = link.get_attribute('href')
-            if href:
-                return href
+            return link.get_attribute('href')
         except:
-            pass
-        return "#"
+            return "#"
 
     def _safe_extract_img(self, element):
         """Extrai imagem do elemento de forma segura"""
         try:
             img = element.find_element(By.XPATH, ".//img")
-            src = img.get_attribute('src')
-            if src:
-                return src
+            return img.get_attribute('src')
         except:
-            pass
-        return ""
+            return ""
 
     def _extract_with_javascript(self):
         """Extrai produtos usando JavaScript como fallback"""
@@ -345,7 +315,7 @@ class ProdutoFinder:
                 const results = [];
                 const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc, div[role="listitem"], a[href*="/shopping/"]');
                 containers.forEach(container => {
-                    try {
+                    try:
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"], span[class*="title"]');
                         let price = 'Preço não disponível';
                         const priceSelectors = [
@@ -395,25 +365,19 @@ class ProdutoFinder:
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
-                time.sleep(10)  # Aumentado para 10s
+                time.sleep(5)
                 try:
-                    # Busca por aba "Produtos" ou "Shopping"
+                    # Atualizado o XPath para encontrar a aba 'Produtos'
                     shopping_tab = WebDriverWait(self.driver, 10).until(
                         EC.element_to_be_clickable(
-                            (By.XPATH, "//*[contains(text(), 'Produtos') or contains(text(), 'Shopping') or contains(text(), 'Compras') or contains(text(), 'Product')]"))
+                            (By.XPATH, "//a[contains(., 'Produtos') or contains(., 'Shopping') or contains(., 'Compras') or contains(., 'Product')]"))
                     )
                     shopping_tab.click()
-                    time.sleep(10)  # Espera mais tempo após clicar
-                    logger.info("Aba Produtos/Shopping clicada com sucesso")
-                except TimeoutException:
-                    logger.warning("Aba Produtos/Shopping não encontrada, tentando navegação alternativa")
-                    # Tenta rolar e esperar por produtos
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(5)
-                # Rolagem adicional para carregar produtos
-                for _ in range(3):
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(3)
+                except:
+                    logger.warning("Aba Shopping não encontrada, continuando com página atual")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(3)
                 products = self._extract_products_comprehensive()
                 if products:
                     logger.info(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
@@ -438,10 +402,10 @@ class ProdutoFinder:
             while len(products) < 3 and retries < 3:
                 retries += 1
                 logger.info(f"Produtos encontrados: {len(products)}. Tentando novamente para alcançar pelo menos 3...")
-                time.sleep(5)
-                products += self._executar_busca(search_url)
-                products = list({p['url']: p for p in products}.values())
-            # Se ainda menos que 3, usar fallback por texto
+                time.sleep(5)  # Espera antes de tentar novamente
+                products += self._executar_busca(search_url)  # Tenta novamente
+                products = list({p['url']: p for p in products}.values())  # Remove duplicados
+            # Se ainda menos que 3, usar fallback por texto se query fornecido
             if len(products) < 3 and fallback_query:
                 logger.info("Usando fallback de busca por texto...")
                 text_products = self._search_by_text(fallback_query)
