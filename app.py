@@ -18,7 +18,7 @@ import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import WebDriverException, TimeoutException
+from selenium.common.exceptions import WebDriverException, TimeoutException, NoSuchElementException
 from urllib.parse import quote
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -227,28 +227,24 @@ class ProdutoFinder:
         return bool(re.match(r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?', text, re.IGNORECASE))
 
     def _extract_products_comprehensive(self):
-        """Método robusto para extrair produtos"""
+        """Método robusto para extrair produtos da tela inicial ou 'Correspondências exatas'"""
         produtos = []
         try:
-            # Espera por qualquer elemento de produto ou lista
+            # Espera por elementos na tela inicial ou 'Correspondências exatas'
             WebDriverWait(self.driver, 20).until(
                 EC.any_of(
                     EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'sh-dgr__grid-result')]")),
                     EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'pla-unit')]")),
-                    EC.presence_of_element_located((By.XPATH, "//div[@role='listitem']")),
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'product')]")),
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'kb0PBd')]"))
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'kb0PBd')]")),
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Correspondências exatas')]//following-sibling::div"))
                 )
             )
             selectors = [
                 "//div[contains(@class, 'sh-dgr__grid-result')]",
-                "//div[contains(@class, 'sh-dlr__list-result')]",
                 "//div[contains(@class, 'pla-unit')]",
-                "//div[contains(@class, 'Lv3Kxc')]",
-                "//div[@data-product]",
-                "//div[@role='listitem']",
                 "//div[contains(@class, 'kb0PBd cvP2Ce')]",
-                "//a[contains(@class, 'UAQDqe')]"
+                "//div[contains(text(), 'Correspondências exatas')]//following-sibling::div//div[contains(@class, 'sh-dgr__grid-result') or contains(@class, 'pla-unit')]",
+                "//div[@role='listitem']"
             ]
             for selector in selectors:
                 try:
@@ -263,7 +259,7 @@ class ProdutoFinder:
                                     "url": self._safe_extract_url(element),
                                     "img": self._safe_extract_img(element)
                                 }
-                                if produto["nome"] and produto["url"] != "#":
+                                if produto["nome"] and produto["url"] != "#" and produto["img"]:
                                     produtos.append(produto)
                                     logger.info(f"Produto extraído: {produto['nome']} - {produto['preco']}")
                             except Exception as e:
@@ -303,11 +299,10 @@ class ProdutoFinder:
                         return text
                 except:
                     continue
-            # Fallback para qualquer texto visível
             try:
                 text = element.text.strip()
                 if text and len(text) > 3:
-                    return text[:100]  # Limita a 100 chars
+                    return text[:100]
             except:
                 pass
             return "Produto similar"
@@ -319,11 +314,11 @@ class ProdutoFinder:
         try:
             if element.tag_name == 'a':
                 href = element.get_attribute('href')
-                if href:
+                if href and "http" in href:
                     return href
             link = element.find_element(By.XPATH, ".//a")
             href = link.get_attribute('href')
-            if href:
+            if href and "http" in href:
                 return href
         except:
             pass
@@ -334,7 +329,7 @@ class ProdutoFinder:
         try:
             img = element.find_element(By.XPATH, ".//img")
             src = img.get_attribute('src')
-            if src:
+            if src and "http" in src:
                 return src
         except:
             pass
@@ -345,9 +340,9 @@ class ProdutoFinder:
         try:
             return self.driver.execute_script("""
                 const results = [];
-                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.sh-dlr__list-result, div.pla-unit, div.Lv3Kxc, div[role="listitem"], a[href*="/shopping/"], div.kb0PBd.cvP2Ce');
+                const containers = document.querySelectorAll('div.sh-dgr__grid-result, div.pla-unit, div.kb0PBd.cvP2Ce, div[role="listitem"], a[href*="/shopping/"]');
                 containers.forEach(container => {
-                    try:
+                    try {
                         const titleEl = container.querySelector('h3, h4, [class*="title"], [class*="header"], span[class*="title"], div.bONr3b');
                         let price = 'Preço não disponível';
                         const priceSelectors = [
@@ -399,23 +394,23 @@ class ProdutoFinder:
                 )
                 time.sleep(5)
                 try:
-                    # Atualizado o XPath para encontrar a aba 'Produtos' ou 'Correspondências exatas'
-                    shopping_tab = WebDriverWait(self.driver, 10).until(
+                    # Tenta clicar em 'Correspondências exatas' ou 'Produtos'
+                    exact_match_tab = WebDriverWait(self.driver, 10).until(
                         EC.element_to_be_clickable(
-                            (By.XPATH, "//*[contains(text(), 'Produtos') or contains(text(), 'Shopping') or contains(text(), 'Compras') or contains(text(), 'Product') or contains(text(), 'Correspondências exatas')]"))
+                            (By.XPATH, "//*[contains(text(), 'Correspondências exatas') or contains(text(), 'Produtos') or contains(text(), 'Shopping')]"))
                     )
-                    shopping_tab.click()
+                    exact_match_tab.click()
                     time.sleep(5)
-                    logger.info("Aba Produtos/Shopping ou Correspondências exatas clicada com sucesso")
-                except TimeoutException:
-                    logger.warning("Aba Produtos/Shopping não encontrada, tentando navegação alternativa")
-                    # Tenta rolar e esperar por produtos
+                    logger.info("Aba Correspondências exatas ou Produtos clicada com sucesso")
+                except (TimeoutException, NoSuchElementException):
+                    logger.warning("Aba Correspondências exatas ou Produtos não encontrada, usando tela inicial")
+                    # Rola a página para carregar mais conteúdo
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(5)
-                # Rolagem adicional para carregar produtos
+                # Rolagem adicional
                 for _ in range(3):
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(3)
+                    time.sleep(2)
                 products = self._extract_products_comprehensive()
                 if products:
                     logger.info(f"Encontrados {len(products)} produtos na tentativa {attempt + 1}")
