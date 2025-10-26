@@ -206,6 +206,7 @@ class ProdutoFinder:
     def _safe_extract_price(self, element):
         """Extrai preço do elemento de forma robusta"""
         try:
+            # Lista expandida de seletores para preços, incluindo o seletor específico para Google Shopping
             price_selectors = [
                 ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
                 ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
@@ -217,6 +218,7 @@ class ProdutoFinder:
                 ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
             ]
 
+            # Tenta encontrar o preço com os seletores
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
@@ -228,6 +230,7 @@ class ProdutoFinder:
                     logger.debug(f"Seletor {selector} falhou: {str(e)}")
                     continue
 
+            # Fallback: busca no texto completo do elemento
             try:
                 full_text = element.text
                 price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
@@ -239,6 +242,7 @@ class ProdutoFinder:
             except Exception as e:
                 logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
+            # Fallback final: retorna mensagem padrão
             logger.warning("Nenhum preço válido encontrado")
             return "Preço não disponível"
         except Exception as e:
@@ -246,71 +250,95 @@ class ProdutoFinder:
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido em reais (R$) ou dólares ($)"""
-        if not text or not isinstance(text, str):
+        """Verifica se o texto é um preço válido"""
+        if not text:
             return False
 
-        # Aceita preços com R$ ou $ (para conversão)
-        if 'R$' in text or '$' in text and not any(sym in text for sym in ['€', '£', 'EUR', 'GBP']):
-            price_patterns = [
-                r'(?:R\$|\$)?\s*[\d,.]+(?:[,.]\d{2})?',
-                r'[\d]+[.,][\d]+(?:\s*(?:R\$|\$))?',
-                r'[\d]+(?:\s*(?:reais|BRL|dólares|USD))',
-                r'(?:de|por)\s*(?:R\$|\$)\s*[\d,.]+',
-                r'[\d,.]+(?:\s*(?:reais|dólares))?',
-            ]
-            for pattern in price_patterns:
-                if re.search(pattern, text, re.IGNORECASE):
-                    return True
+        price_patterns = [
+            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',
+            r'[\d]+[.,][\d]+',
+            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',
+            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',
+            r'[\d,.]+(?:\s*off)?',
+        ]
+
+        for pattern in price_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+
         return False
 
     def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
         """
-        Converte uma imagem para URL usando o serviço imgbb
-        Aceita PIL.Image, URL ou dados binários
+        Improved: Convert an image to URL using the imgbb service
+        Accepts PIL.Image, URL or binary image data
         """
         try:
             if image is not None:
+                # If we received a PIL image
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
+                # Optimize image for better Google Lens processing
+                # Not too small as it needs details, not too large to avoid upload issues
                 optimal_size = (1000, 1000)
                 image.thumbnail(optimal_size, Image.LANCZOS)
+                # Enhance image contrast slightly for better recognition
+                from PIL import ImageEnhance
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(1.2)
+                # Sharpen image slightly
+                from PIL import ImageFilter
                 image = image.filter(ImageFilter.SHARPEN)
                 img_buffer = io.BytesIO()
-                image.save(img_buffer, format='JPEG', quality=90)
+                image.save(img_buffer, format='JPEG', quality=90)  # Higher quality for better recognition
                 img_buffer.seek(0)
                 files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
             elif image_data is not None:
+                # If we received binary image data
                 try:
+                    # Try to process the binary data to enhance it
                     img = Image.open(io.BytesIO(image_data))
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
+                    # Optimize size
                     optimal_size = (1000, 1000)
                     img.thumbnail(optimal_size, Image.LANCZOS)
+                    # Enhance image
+                    from PIL import ImageEnhance
                     enhancer = ImageEnhance.Contrast(img)
                     img = enhancer.enhance(1.2)
+                    # Sharpen
+                    from PIL import ImageFilter
                     img = img.filter(ImageFilter.SHARPEN)
+                    # Save to buffer
                     img_buffer = io.BytesIO()
                     img.save(img_buffer, format='JPEG', quality=90)
                     img_buffer.seek(0)
                     files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
                 except Exception as img_error:
+                    # Fall back to direct binary data if processing fails
                     logger.warning(f"Failed to process image data: {str(img_error)}")
                     files = {'image': ('image.jpg', image_data, 'image/jpeg')}
             elif image_url is not None:
+                # If we received a URL
                 try:
+                    # Try to download the image from URL with appropriate headers
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
                         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
                         'Referer': 'https://mude.ind.br/',
                         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                     }
+                    # Try multiple times with increasing timeouts
                     for attempt in range(3):
                         try:
-                            timeout = 10 * (attempt + 1)
-                            response = requests.get(image_url, headers=headers, timeout=timeout, allow_redirects=True)
+                            timeout = 10 * (attempt + 1)  # 10, 20, 30 seconds
+                            response = requests.get(
+                                image_url,
+                                headers=headers,
+                                timeout=timeout,
+                                allow_redirects=True
+                            )
                             if response.status_code == 200:
                                 break
                             else:
@@ -319,34 +347,53 @@ class ProdutoFinder:
                                 time.sleep(2)
                         except Exception as req_error:
                             logger.warning(f"Attempt {attempt + 1} failed: {str(req_error)}")
-                            if attempt < 2:
+                            if attempt < 2:  # Don't sleep on last attempt
                                 time.sleep(2)
                     if response.status_code != 200:
                         logger.error(f"Error downloading image from URL: {response.status_code}")
-                        return image_url
+                        # Try alternative URL processing
+                        try:
+                            # Try a different approach - use requests with a different user agent
+                            alt_headers = {
+                                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+                            }
+                            response = requests.get(image_url, headers=alt_headers, timeout=30)
+                            if response.status_code != 200:
+                                return image_url  # Return original URL if all fails
+                        except:
+                            return image_url  # Return original URL if fails
+                    # Try to process the downloaded image
                     try:
                         img = Image.open(io.BytesIO(response.content))
                         if img.mode != 'RGB':
                             img = img.convert('RGB')
+                        # Optimize size
                         optimal_size = (1000, 1000)
                         img.thumbnail(optimal_size, Image.LANCZOS)
+                        # Enhance image
+                        from PIL import ImageEnhance
                         enhancer = ImageEnhance.Contrast(img)
                         img = enhancer.enhance(1.2)
+                        # Sharpen
+                        from PIL import ImageFilter
                         img = img.filter(ImageFilter.SHARPEN)
+                        # Save to buffer
                         img_buffer = io.BytesIO()
                         img.save(img_buffer, format='JPEG', quality=90)
                         img_buffer.seek(0)
                         files = {'image': ('image.jpg', img_buffer, 'image/jpeg')}
                     except Exception as proc_error:
+                        # Fall back to direct binary data if processing fails
                         logger.warning(f"Failed to process downloaded image: {str(proc_error)}")
                         files = {'image': ('image.jpg', response.content, 'image/jpeg')}
                 except Exception as e:
                     logger.error(f"Error processing image URL: {str(e)}")
-                    return image_url
+                    return image_url  # Return original URL if all fails
             else:
                 logger.error("No valid image input provided.")
                 return None
-
+            # Try multiple image hosting services in case one fails
+            # First try ImgBB
             retries = 3
             for attempt in range(retries):
                 try:
@@ -370,68 +417,115 @@ class ProdutoFinder:
                     if attempt < retries - 1:
                         time.sleep(2)
                         continue
-
+            # If ImgBB fails, try a fallback approach
             try:
+                # Create a new buffer with the image data
                 if 'img_buffer' in locals():
                     img_buffer.seek(0)
                     data = img_buffer.getvalue()
                 else:
                     data = files['image'][1].read()
+                # Try base64 encoding approach
+                import base64
                 encoded = base64.b64encode(data).decode('utf-8')
+                # Return data URI format - many search engines can handle this format
                 return f"data:image/jpeg;base64,{encoded}"
             except Exception as fallback_error:
                 logger.error(f"Fallback approach failed: {str(fallback_error)}")
+            # If we have an original URL, return it
             if image_url:
                 return image_url
             return None
         except Exception as e:
             logger.error(f"Error converting image: {str(e)}")
+            # If we have an original URL, return it on error
             if image_url:
                 return image_url
             return None
 
-    def _extract_products_selenium(self, search_query):
-        """Extrai produtos da página, limitando a sites brasileiros comerciais com preços em reais,
-        excluindo redes sociais, Amazon e itens sem preço"""
-        products = []
+    def _extract_products_selenium(self):
+        """CORREÇÃO: Método robusto para extração de produtos em 2024"""
         try:
-            brazilian_domains = [
-                '.com.br', 'mercadolivre.com.br', 'americanas.com.br', 'magazinevoce.com.br',
-                'submarino.com.br', 'shoptime.com.br', 'casasbahia.com.br', 'pontofrio.com.br'
-            ]
+            # Mostra a URL atual para debug
+            print(f"\nURL atual: {self.driver.current_url}")
+            # Espera pelo container principal
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-snc]"))
+            )
+            # Rolagem progressiva para carregar todos os elementos
+            for y in [300, 600, 900]:
+                self.driver.execute_script(f"window.scrollTo(0, {y});")
+                time.sleep(1.5)
+            # Extrai os produtos usando JavaScript CORRIGIDO
+            produtos = self.driver.execute_script("""
+                const results = [];
+                const containers = document.querySelectorAll('div[data-snc]');
+                containers.forEach(container => {
+                    const products = container.querySelectorAll('div[data-snf]');
+                    products.forEach(product => {
+                        try {
+                            const name = product.querySelector('[role="heading"]')?.innerText?.trim();
 
-            product_elements = self.driver.find_elements(By.XPATH,
-                                                         "//div[contains(@class, 'sh-dgr__grid-result')] | //div[contains(@class, 'pla-unit')]")
-            for element in product_elements:
-                try:
-                    name_element = element.find_element(By.XPATH, ".//h3 | .//span[contains(@class, 'title')]")
-                    name = name_element.text.strip()
-                    price_text = self._safe_extract_price(element)
-                    url_element = element.find_element(By.XPATH, ".//a[@href]")
-                    url = url_element.get_attribute('href')
+                            // CORREÇÃO: Múltiplos seletores para preço
+                            let price = 'Preço não disponível';
+                            const priceSelectors = [
+                                'span[aria-hidden="true"]',
+                                '.e10twf',
+                                '.a8Pemb', 
+                                '.T14wmb',
+                                '.O8U6h',
+                                '.NRRPPb',
+                                '.notranslate',
+                                'span:contains("R$")',
+                                'div:contains("R$")',
+                                'span:contains("$")'
+                            ];
 
-                    is_brazilian = any(domain in url.lower() for domain in brazilian_domains)
-                    if is_brazilian and name and price_text != "Preço não disponível" and self._is_valid_price_text(
-                            price_text):
-                        price_value = self._safe_extract_price_from_string(price_text)
-                        img = element.find_elements(By.XPATH, ".//img")
-                        img_url = img[0].get_attribute('src') if img else None
-                        products.append({
-                            'nome': name,
-                            'preco': f"R$ {price_value:.2f}",
-                            'url': url,
-                            'img': img_url
-                        })
-                        logger.info(f"Produto brasileiro encontrado: {name} - {url} - Preço: R$ {price_value:.2f}")
-                    else:
-                        logger.debug(f"URL ou preço ignorado (não brasileiro ou sem preço): {url} - {price_text}")
-                except Exception as e:
-                    logger.debug(f"Erro ao extrair produto: {str(e)}")
-                    continue
+                            for (const selector of priceSelectors) {
+                                const priceEl = product.querySelector(selector);
+                                if (priceEl && priceEl.innerText && priceEl.innerText.trim()) {
+                                    const priceText = priceEl.innerText.trim();
+                                    // Verifica se contém símbolos de moeda ou números
+                                    if (priceText.match(/[R$€£¥₹]|\\d+[.,]\\d+|\\d+/)) {
+                                        price = priceText;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Se ainda não encontrou, busca no texto completo
+                            if (price === 'Preço não disponível') {
+                                const fullText = product.innerText || '';
+                                const priceMatch = fullText.match(/R\\$\\s*[\\d.,]+|\\$\\s*[\\d.,]+|€\\s*[\\d.,]+|£\\s*[\\d.,]+/);
+                                if (priceMatch) {
+                                    price = priceMatch[0];
+                                }
+                            }
+
+                            const link = product.querySelector('a')?.href;
+                            const image = product.querySelector('img')?.src;
+                            if (name && link) {
+                                results.push({
+                                    nome: name,
+                                    preco: price,
+                                    url: link,
+                                    img: image || ''
+                                });
+                            }
+                        } catch(e) {
+                            console.error('Error extracting product:', e);
+                        }
+                    });
+                });
+                return results.slice(0, 5); // Limita a 5 resultados
+            """)
+            if not produtos:
+                print("Nenhum produto encontrado via JavaScript, tentando método alternativo...")
+                return self._extract_products_alternative()
+            return produtos
         except Exception as e:
-            logger.error(f"Erro geral na extração de produtos: {str(e)}")
-
-        return products[:5]
+            print(f"Erro na extração principal: {str(e)}")
+            return self._extract_products_alternative()
 
     def _extract_products_alternative(self):
         """Método alternativo quando o principal falha"""
@@ -813,11 +907,12 @@ class ProdutoFinder:
         return "#"
 
     def _initialize_driver(self):
-        chrome_options = Options()
+        chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--window-size=1280,720")
+        # Desativa o Selenium Manager
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         os.environ['SELENIUM_DISABLE_MANAGER'] = '1'
         try:
@@ -880,9 +975,9 @@ class ProdutoFinder:
         try:
             if self.driver:
                 self.driver.quit()
-                logger.info("Driver encerrado com sucesso")
+                print("Driver encerrado com sucesso")
         except Exception as e:
-            logger.error(f"Erro ao encerrar driver: {str(e)}")
+            print(f"Erro ao encerrar driver: {str(e)}")
         finally:
             self.driver = None
 
@@ -977,19 +1072,33 @@ class ProdutoFinder:
             return []
 
     def buscar_produtos_por_url(self, image_url):
-        """Busca produtos similares por URL de imagem com fallback"""
-        logger.info(f"Iniciando busca para imagem: {image_url}")
+        """CORREÇÃO: Busca produtos no Google Lens focando na extração direta dos elementos"""
+        print(f"\n=== Iniciando busca para imagem: {image_url} ===")
         if not self._initialize_driver():
+            print("Falha ao inicializar o driver")
             return []
         try:
             encoded_url = urllib.parse.quote(image_url)
             search_url = f"https://lens.google.com/uploadbyurl?url={encoded_url}"
-            return self._executar_busca(search_url, image_url)
+            print(f"\nURL de busca no Google Lens: {search_url}")
+            self.driver.get(search_url)
+            time.sleep(8)  # Espera inicial maior
+            # Capturar a URL atual após redirecionamento
+            current_url = self.driver.current_url
+            print(f"\nURL atual após redirecionamento: {current_url}")
+            # Extrair produtos diretamente da página do Google Lens
+            produtos = self._extract_from_lens_page()
+            # Debug final
+            print(f"\n=== Resultados encontrados ===")
+            for i, p in enumerate(produtos, 1):
+                print(f"{i}. {p.get('nome', '')} | {p.get('preco', '')} | {p.get('url', '')}")
+            return produtos
         except Exception as e:
-            logger.error(f"Erro durante a busca: {str(e)}")
+            print(f"\nErro durante a busca: {str(e)}")
             return []
         finally:
             self.cleanup()
+            print("\n=== Busca concluída ===")
 
     def _extract_products_from_lens_url(self, lens_url):
         """Método especializado para extrair produtos de uma URL do Google Lens"""
@@ -1121,10 +1230,19 @@ class ProdutoFinder:
 
     def _check_for_captcha(self):
         """Verifica se há captcha na página"""
-        try:
-            return self.driver.find_element(By.ID, 'recaptcha') is not None
-        except:
-            return False
+        captcha_selectors = [
+            "div#captcha",
+            "div.recaptcha",
+            "iframe[src*='recaptcha']",
+            "div[class*='captcha']"
+        ]
+        for selector in captcha_selectors:
+            try:
+                if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                    return True
+            except:
+                continue
+        return False
 
     def _extract_with_javascript(self):
         """Fallback com extração via JavaScript"""
@@ -1412,16 +1530,12 @@ class ProdutoFinder:
         return produto
 
     def _executar_busca(self, search_url):
-        """Método interno para executar a busca no Google Lens, limitado ao Brasil"""
+        """Método interno para executar a busca no Google Lens"""
         products = []
         for attempt in range(self.max_retries):
             try:
                 self.driver.delete_all_cookies()
-                if '?' in search_url:
-                    search_url += '&gl=br&hl=pt-BR'
-                else:
-                    search_url += '?gl=br&hl=pt-BR'
-                print(f"\nTentativa {attempt + 1} - Acessando URL: {search_url}")
+                print(f"\nTentativa {attempt + 1} - Acessando URL...")
                 self.driver.get(search_url)
                 time.sleep(10)
                 for y in [500, 1000, 1500, 2000]:
@@ -1432,8 +1546,7 @@ class ProdutoFinder:
                     time.sleep(20)
                 try:
                     shopping_tab = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
+                        EC.element_to_be_clickable((By.XPATH, "//div[.//text()[contains(., 'Shopping') or contains(., 'Compras')]]"))
                     )
                     shopping_tab.click()
                     time.sleep(10)
@@ -1451,30 +1564,31 @@ class ProdutoFinder:
                 print(f"Tentativa {attempt + 1} falhou: {str(e)}")
                 if attempt < self.max_retries - 1:
                     self._initialize_driver()
-        return products
+        return products[:5]
 
     def _safe_extract_price_from_string(self, price_str):
         """
-        Extrai e converte um preço de uma string para um float em reais,
-        aceitando preços com R$ ou $ (convertendo $ para R$ multiplicando por 5.5).
+        Extrai e converte um preço de uma string para um float,
+        lidando com símbolos de moeda e diferentes formatos de separadores.
         """
         if not price_str or price_str.strip() == "" or price_str == "Preço não disponível":
             return 0.0
 
-        is_negative = price_str.startswith('-')
-        price_str = price_str.replace('-', '').strip()
+        currency_symbols = ['$', '€', '£', '¥', 'R$', '₹', '฿', '₽', '₩', '₪', '₫', '₭', '₮', '₯', '₰', '₱', '₲', '₳',
+                            '₴', '₵', '₶', '₷', '₸']
 
-        convert_to_reais = False
-        if 'R$' in price_str:
-            price_str = price_str.replace('R$', '').strip()
-        elif '$' in price_str:
-            price_str = price_str.replace('$', '').strip()
-            convert_to_reais = True
+        for symbol in currency_symbols:
+            price_str = price_str.replace(symbol, '')
+
+        if price_str.startswith('-'):
+            is_negative = True
+            price_str = price_str[1:].lstrip()
         else:
-            logger.warning(f"Preço ignorado (moeda inválida detectada): {price_str}")
-            return 0.0
+            is_negative = False
+            price_str = price_str.lstrip()
 
         price_str = ''.join(c for c in price_str if c.isdigit() or c in '.,')
+
         dot_pos = price_str.rfind('.')
         comma_pos = price_str.rfind(',')
 
@@ -1494,9 +1608,6 @@ class ProdutoFinder:
             number = float(number_str)
             if is_negative:
                 number = -number
-            if convert_to_reais:
-                number = number * 5.5
-                logger.info(f"Convertido de $ {number / 5.5:.2f} para R$ {number:.2f}")
             return number
         except ValueError:
             return 0.0

@@ -204,69 +204,69 @@ class ProdutoFinder:
             return "#"
 
     def _safe_extract_price(self, element):
-        """Extrai preço do elemento de forma robusta"""
+        """Extrai preço com alta precisão - CORRIGIDO PARA 2025"""
         try:
-            # Lista expandida de seletores para preços, incluindo o seletor específico para Google Shopping
+            # 1. Tenta extrair preço do span com aria-hidden="true" (padrão Google Shopping)
+            try:
+                price_el = element.find_element(By.XPATH, ".//span[@aria-hidden='true']")
+                price_text = price_el.text.strip()
+                if price_text and self._is_valid_price_text(price_text):
+                    logger.info(f"Preço encontrado via aria-hidden: {price_text}")
+                    return price_text
+            except:
+                pass
+
+            # 2. Tenta seletores comuns de preço (classes ofuscadas)
             price_selectors = [
-                ".//span[contains(@class, 'price') or contains(@class, 'a8Pemb') or contains(@class, 'e10twf') or contains(@class, 'T14wmb') or contains(@class, 'O8U6h') or contains(@class, 'NRRPPb') or contains(@class, 'notranslate') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
-                ".//div[contains(@class, 'price') or contains(text(), 'R$') or contains(text(), '$') or contains(text(), '€') or contains(text(), '£')]",
-                ".//span[@aria-hidden='true']",
-                ".//span[contains(@class, 'currency') or contains(@class, 'value')]",
-                ".//div[contains(@class, 'sh-price') or contains(@class, 'pla-unit-price')]",
-                ".//span[contains(@class, 'formatted-price') or contains(@class, 'offer-price')]",
-                ".//div[contains(@class, 'price-container') or contains(@class, 'price-block')]",
-                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]"
+                ".//span[contains(@class, 'a8Pemb') and contains(@class, 'OFFNJ')]",
+                ".//span[contains(@class, 'notranslate')]",
+                ".//span[contains(@class, 'T14wmb')]",
+                ".//span[contains(@class, 'O8U6h')]",
+                ".//span[contains(@class, 'NRRPPb')]",
+                ".//div[contains(@class, 'sh-price')]",
+                ".//span[contains(text(), 'R$') or contains(text(), '$')]",
             ]
 
-            # Tenta encontrar o preço com os seletores
             for selector in price_selectors:
                 try:
                     el = element.find_element(By.XPATH, selector)
                     price_text = el.text.strip()
                     if price_text and self._is_valid_price_text(price_text):
-                        logger.info(f"Preço encontrado: {price_text} (seletor: {selector})")
+                        logger.info(f"Preço encontrado via seletor: {price_text} ({selector})")
                         return price_text
-                except Exception as e:
-                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
+                except:
                     continue
 
-            # Fallback: busca no texto completo do elemento
-            try:
-                full_text = element.text
-                price_pattern = r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?'
-                matches = re.findall(price_pattern, full_text, re.IGNORECASE)
+            # 3. Fallback: busca no texto completo do produto
+            full_text = element.text
+            import re
+            patterns = [
+                r'R\$\s*[\d.,]+',
+                r'\$\s*[\d.,]+',
+                r'[\d.,]+\s*R\$',
+                r'[\d.,]+'
+            ]
+            for pattern in patterns:
+                matches = re.findall(pattern, full_text)
                 for match in matches:
                     if self._is_valid_price_text(match):
                         logger.info(f"Preço encontrado no texto completo: {match}")
                         return match
-            except Exception as e:
-                logger.debug(f"Falha na busca por texto completo: {str(e)}")
 
-            # Fallback final: retorna mensagem padrão
             logger.warning("Nenhum preço válido encontrado")
             return "Preço não disponível"
+
         except Exception as e:
-            logger.error(f"Erro geral na extração de preço: {str(e)}")
+            logger.error(f"Erro ao extrair preço: {str(e)}")
             return "Preço não disponível"
 
     def _is_valid_price_text(self, text):
-        """Verifica se o texto é um preço válido"""
-        if not text:
+        """Valida se o texto contém um preço real"""
+        if not text or len(text) < 2:
             return False
-
-        price_patterns = [
-            r'(?:R\$|\$|€|£|USD|BRL)?\s*[\d,.]+(?:[,.]\d{2})?',
-            r'[\d]+[.,][\d]+',
-            r'[\d]+(?:\s*(?:reais|dólares|euros|USD|BRL))',
-            r'(?:de|por)\s*(?:R\$|\$|€|£)\s*[\d,.]+',
-            r'[\d,.]+(?:\s*off)?',
-        ]
-
-        for pattern in price_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-
-        return False
+        # Remove espaços e verifica se tem número + símbolo de moeda
+        cleaned = text.replace(' ', '').replace('\n', '')
+        return bool(re.search(r'(R\$|\$|€|£)[\d]+|[\d.,]{3,}', cleaned))
 
     def _convert_image_to_url(self, image=None, image_url=None, image_data=None):
         """
